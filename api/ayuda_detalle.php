@@ -32,6 +32,9 @@ if (!isset($_GET['id']) || empty($_GET['id'])) {
 
 $ayuda_id = (int)$_GET['id'];
 
+// Obtener rol del usuario de la sesión
+$user_role = $_SESSION['rol'] ?? 'empleado';
+
 try {
     // Obtener datos completos de la ayuda
     $stmt = $pdo->prepare("
