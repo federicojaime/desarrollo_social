@@ -1,0 +1,158 @@
+/* Archivo movido desde index.php/styles.css para una estructura profesional */
+
+/* Reset y configuración base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary-color: #2563eb;
+    --primary-dark: #1d4ed8;
+    --primary-light: #3b82f6;
+    --secondary-color: #64748b;
+    --success-color: #10b981;
+    --error-color: #ef4444;
+    --warning-color: #f59e0b;
+    --background-color: #f8fafc;
+    --surface-color: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --border-color: #e2e8f0;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --border-radius: 8px;
+    --transition: all 0.2s ease-in-out;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-container {
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 32px 24px 24px 24px;
+    background: var(--surface-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.logo-muni {
+    display: block;
+    margin: 0 auto 18px auto;
+    max-width: 110px;
+    height: auto;
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 18px;
+}
+
+.login-header h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
+}
+
+.login-header p {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    margin-bottom: 0;
+}
+
+.form-group {
+    width: 100%;
+    margin-bottom: 1.2rem;
+}
+
+label {
+    display: block;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+    font-size: 0.95rem;
+}
+
+input[type="text"],
+input[type="password"] {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    background: var(--background-color);
+    color: var(--text-primary);
+    transition: var(--transition);
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.btn {
+    width: 100%;
+    padding: 0.8rem;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--primary-color);
+    color: #fff;
+    transition: var(--transition);
+    margin-top: 0.5rem;
+}
+
+.btn:hover {
+    background: var(--primary-dark);
+}
+
+.error {
+    background: #fef2f2;
+    color: var(--error-color);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    border: 1px solid #fecaca;
+    width: 100%;
+    text-align: center;
+}
+
+.success {
+    background: #f0fdf4;
+    color: var(--success-color);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    border: 1px solid #bbf7d0;
+    width: 100%;
+    text-align: center;
+}
+
+@media (max-width: 480px) {
+    .login-container {
+        padding: 18px 6px 18px 6px;
+    }
+    .login-header h2 {
+        font-size: 1.3rem;
+    }
+}

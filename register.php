@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registrar Usuario - Desarrollo Social</title>
-    <link rel="stylesheet" href="index.php/styles.css">
+    <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
     <div class="login-container">
@@ -55,6 +55,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php if (!empty($mensaje)): ?>
                 <div class="mensaje"><?= htmlspecialchars($mensaje) ?></div>
             <?php endif; ?>
+
+            <img src="assets/img/muni_sf.png" alt="Logo Municipalidad" class="logo-muni" style="display:block;margin:0 auto 20px auto;max-width:120px;">
 
             <form method="POST">
                 <div class="form-group">

@@ -1,191 +1,180 @@
 <?php
 session_start();
-require 'includes/conexion.php'; // Asegúrate de que este archivo conecta a la base de datos
-// require 'vendor/autoload.php'; // Habilitar si usas librerías como PhpOffice para un XLSX real
+require 'includes/conexion.php';
 
-// Verificar que el usuario esté logueado
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// Obtener el rol del usuario logueado desde la sesión
-$user_role = $_SESSION['rol'] ?? 'empleado'; // 'empleado' por defecto si no está definido
-
+$user_role = $_SESSION['rol'] ?? 'empleado';
 $mensaje = '';
 $error = '';
 
-// Recuperar mensajes de sesión si existen
+// Recuperar mensajes
 if (isset($_SESSION['mensaje'])) {
     $mensaje = $_SESSION['mensaje'];
-    unset($_SESSION['mensaje']); // Limpiar el mensaje después de mostrarlo
+    unset($_SESSION['mensaje']);
 }
 if (isset($_SESSION['error'])) {
     $error = $_SESSION['error'];
-    unset($_SESSION['error']); // Limpiar el error después de mostrarlo
+    unset($_SESSION['error']);
 }
 
-// Manejo de Agregar/Editar Familia
+// Manejo de formularios
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['agregar_familia']) || isset($_POST['editar_familia'])) {
-        $id = $_POST['familia_id'] ?? null;
-        $nombre_jefe = trim($_POST['nombre_jefe']);
-        $dni_jefe = trim($_POST['dni_jefe']); // Nuevo campo DNI
-        $direccion = trim($_POST['direccion']); // ¡Error corregido aquí!
-        $telefono = trim($_POST['telefono']);
-        $integrantes = (int)$_POST['integrantes'];
+    if (isset($_POST['accion'])) {
+        switch ($_POST['accion']) {
+            case 'agregar':
+            case 'editar':
+                $familia_id = $_POST['familia_id'] ?? null;
+                $nombre_jefe = limpiarEntrada($_POST['nombre_jefe']);
+                $apellido_jefe = limpiarEntrada($_POST['apellido_jefe']);
+                $dni_jefe = limpiarEntrada($_POST['dni_jefe']);
+                $telefono = limpiarEntrada($_POST['telefono']);
+                $direccion = limpiarEntrada($_POST['direccion']);
+                $barrio = limpiarEntrada($_POST['barrio']);
+                $cantidad_integrantes = (int)$_POST['cantidad_integrantes'];
 
-        if (empty($nombre_jefe) || empty($dni_jefe)) { // DNI ahora es obligatorio
-            $_SESSION['error'] = "El nombre del jefe de familia y el DNI son obligatorios.";
-        } elseif (!ctype_digit($dni_jefe)) { // Validar que el DNI contenga solo dígitos
-            $_SESSION['error'] = "El DNI del jefe de familia debe contener solo números.";
-        } else {
-            try {
-                // Verificar si el DNI ya existe (excepto para la familia que se está editando)
-                $stmt_check_dni = $pdo->prepare("SELECT COUNT(*) FROM familias WHERE dni_jefe = ? AND id != ?");
-                $stmt_check_dni->execute([$dni_jefe, $id ?? 0]);
-                if ($stmt_check_dni->fetchColumn() > 0) {
-                    $_SESSION['error'] = "Ya existe una familia con el DNI del jefe ingresado.";
+                if (empty($nombre_jefe) || empty($apellido_jefe) || empty($dni_jefe)) {
+                    $_SESSION['error'] = "Nombre, apellido y DNI del jefe de familia son obligatorios.";
+                } elseif (!preg_match('/^\d{7,8}$/', $dni_jefe)) {
+                    $_SESSION['error'] = "El DNI debe tener entre 7 y 8 dígitos.";
                 } else {
-                    if ($id) {
-                        // Editar familia
-                        $stmt = $pdo->prepare("UPDATE familias SET nombre_jefe = ?, dni_jefe = ?, direccion = ?, telefono = ?, integrantes = ? WHERE id = ?");
-                        $stmt->execute([$nombre_jefe, $dni_jefe, $direccion, $telefono, $integrantes, $id]);
-                        $_SESSION['mensaje'] = "Familia actualizada correctamente.";
-                    } else {
-                        // Agregar nueva familia
-                        $stmt = $pdo->prepare("INSERT INTO familias (nombre_jefe, dni_jefe, direccion, telefono, integrantes) VALUES (?, ?, ?, ?, ?)");
-                        $stmt->execute([$nombre_jefe, $dni_jefe, $direccion, $telefono, $integrantes]);
-                        $_SESSION['mensaje'] = "Familia agregada correctamente.";
+                    try {
+                        // Verificar DNI duplicado
+                        $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM familias WHERE dni_jefe = ? AND id != ?");
+                        $stmt_check->execute([$dni_jefe, $familia_id ?? 0]);
+                        
+                        if ($stmt_check->fetchColumn() > 0) {
+                            $_SESSION['error'] = "Ya existe una familia registrada con ese DNI.";
+                        } else {
+                            if ($familia_id) {
+                                // Editar
+                                $stmt = $pdo->prepare("
+                                    UPDATE familias SET 
+                                        nombre_jefe = ?, apellido_jefe = ?, dni_jefe = ?, 
+                                        telefono = ?, direccion = ?, barrio = ?, cantidad_integrantes = ?
+                                    WHERE id = ?
+                                ");
+                                $stmt->execute([
+                                    $nombre_jefe, $apellido_jefe, $dni_jefe, 
+                                    $telefono, $direccion, $barrio, $cantidad_integrantes, $familia_id
+                                ]);
+                                
+                                registrarLog($pdo, 'familias', $familia_id, 'actualizar', 
+                                    "Familia actualizada: $nombre_jefe $apellido_jefe", $_SESSION['user_id']);
+                                
+                                $_SESSION['mensaje'] = "Familia actualizada correctamente.";
+                            } else {
+                                // Agregar
+                                $stmt = $pdo->prepare("
+                                    INSERT INTO familias (nombre_jefe, apellido_jefe, dni_jefe, telefono, direccion, barrio, cantidad_integrantes) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                                ");
+                                $stmt->execute([
+                                    $nombre_jefe, $apellido_jefe, $dni_jefe, 
+                                    $telefono, $direccion, $barrio, $cantidad_integrantes
+                                ]);
+                                
+                                $nuevo_id = $pdo->lastInsertId();
+                                registrarLog($pdo, 'familias', $nuevo_id, 'crear', 
+                                    "Nueva familia registrada: $nombre_jefe $apellido_jefe", $_SESSION['user_id']);
+                                
+                                $_SESSION['mensaje'] = "Familia registrada correctamente.";
+                            }
+                        }
+                    } catch (PDOException $e) {
+                        $_SESSION['error'] = "Error de base de datos: " . $e->getMessage();
                     }
                 }
-            } catch (PDOException $e) {
-                $_SESSION['error'] = "Error de base de datos: " . $e->getMessage();
-            }
+                break;
+                
+            case 'eliminar':
+                $familia_id = $_POST['familia_id'];
+                try {
+                    // Verificar si tiene asignaciones
+                    $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM asignaciones WHERE familia_id = ? OR id_persona IN (SELECT id FROM personas WHERE id_familia = ?)");
+                    $stmt_check->execute([$familia_id, $familia_id]);
+                    
+                    if ($stmt_check->fetchColumn() > 0) {
+                        $_SESSION['error'] = "No se puede eliminar la familia porque tiene asignaciones asociadas.";
+                    } else {
+                        $stmt = $pdo->prepare("UPDATE familias SET estado = 'inactiva' WHERE id = ?");
+                        $stmt->execute([$familia_id]);
+                        
+                        registrarLog($pdo, 'familias', $familia_id, 'eliminar', 
+                            "Familia desactivada", $_SESSION['user_id']);
+                        
+                        $_SESSION['mensaje'] = "Familia desactivada correctamente.";
+                    }
+                } catch (PDOException $e) {
+                    $_SESSION['error'] = "Error al eliminar familia: " . $e->getMessage();
+                }
+                break;
         }
-        header("Location: familias.php"); // Redirigir para evitar reenvío de formulario
-        exit();
-    } elseif (isset($_POST['eliminar_familia'])) {
-        $id = $_POST['familia_id'];
-        try {
-            // Verificar si hay personas asociadas a esta familia
-            $stmt_check_personas = $pdo->prepare("SELECT COUNT(*) FROM personas WHERE id_familia = ?");
-            $stmt_check_personas->execute([$id]);
-            if ($stmt_check_personas->fetchColumn() > 0) {
-                $_SESSION['error'] = "No se puede eliminar la familia porque tiene personas asociadas. Primero desvincula las personas o elimínalas.";
-            } else {
-                // Eliminar familia
-                $stmt = $pdo->prepare("DELETE FROM familias WHERE id = ?");
-                $stmt->execute([$id]);
-                $_SESSION['mensaje'] = "Familia eliminada correctamente.";
-            }
-        } catch (PDOException $e) {
-            $_SESSION['error'] = "Error de base de datos: " . $e->getMessage();
-        }
-        header("Location: familias.php");
-        exit();
-    } elseif (isset($_POST['importar_familias_xls'])) {
-        // Lógica de importación de XLS para Familias
-        if (isset($_FILES['xlsFileFamilias']) && $_FILES['xlsFileFamilias']['error'] == UPLOAD_ERR_OK) {
-            $fileTmpPath = $_FILES['xlsFileFamilias']['tmp_name'];
-            $fileName = $_FILES['xlsFileFamilias']['name'];
-            $fileExtension = pathinfo($fileName, PATHINFO_EXTENSION);
-
-            if ($fileExtension !== 'xls' && $fileExtension !== 'xlsx') {
-                $_SESSION['error'] = "Por favor, sube un archivo Excel válido (.xls o .xlsx).";
-                header("Location: familias.php");
-                exit();
-            }
-
-            // Aquí iría la lógica real de procesamiento del archivo XLS
-            // Esto es un placeholder. Necesitarías una librería como PhpOffice/PhpSpreadsheet para esto.
-            // Puedes ver un ejemplo conceptual comentado en el dashboard.php si lo necesitas.
-
-            $_SESSION['mensaje'] = "Importación de Familias desde XLS procesada. (Funcionalidad completa requiere librería PhpOffice/PhpSpreadsheet)";
-        } else {
-            $_SESSION['error'] = "Error al subir el archivo XLS.";
-        }
-        header("Location: familias.php");
-        exit();
-    } elseif (isset($_POST['exportar_familias_xls'])) {
-        // Lógica de exportación a XLS para Familias
-        // Esto es un placeholder. Necesitarías una librería como PhpOffice/PhpSpreadsheet.
-
-        // Ejemplo conceptual con PhpOffice/PhpSpreadsheet:
-        /*
-        try {
-            require 'vendor/autoload.php'; // Asegúrate de tener la librería instalada via Composer
-            use PhpOffice\PhpSpreadsheet\Spreadsheet;
-            use PhpOffice\PhpSpreadsheet\Writer\Xls;
-
-            $spreadsheet = new Spreadsheet();
-            $sheet = $spreadsheet->getActiveSheet();
-
-            // Encabezados
-            $sheet->setCellValue('A1', 'Nombre Jefe');
-            $sheet->setCellValue('B1', 'DNI Jefe');
-            $sheet->setCellValue('C1', 'Dirección');
-            $sheet->setCellValue('D1', 'Teléfono');
-            $sheet->setCellValue('E1', 'Integrantes');
-            $sheet->setCellValue('F1', 'Fecha Registro');
-
-            // Datos
-            $rowIndex = 2;
-            $stmt = $pdo->query("SELECT * FROM familias ORDER BY nombre_jefe ASC");
-            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $sheet->setCellValue('A' . $rowIndex, $row['nombre_jefe']);
-                $sheet->setCellValue('B' . $rowIndex, $row['dni_jefe']);
-                $sheet->setCellValue('C' . $rowIndex, $row['direccion']);
-                $sheet->setCellValue('D' . $rowIndex, $row['telefono']);
-                $sheet->setCellValue('E' . $rowIndex, $row['integrantes']);
-                $sheet->setCellValue('F' . $rowIndex, date('d/m/Y', strtotime($row['fecha_registro'])));
-                $rowIndex++;
-            }
-
-            $writer = new Xls($spreadsheet);
-            $fileName = 'familias_' . date('Ymd_His') . '.xls';
-
-            header('Content-Type: application/vnd.ms-excel');
-            header('Content-Disposition: attachment;filename="' . $fileName . '"');
-            header('Cache-Control: max-age=0');
-
-            $writer->save('php://output');
-            exit;
-
-        } catch (Exception $e) {
-            $_SESSION['error'] = "Error al exportar a XLS: " . $e->getMessage();
-            header("Location: familias.php");
-            exit();
-        }
-        */
-        $_SESSION['mensaje'] = "Exportación de Familias a XLS procesada. (Funcionalidad completa requiere librería PhpOffice/PhpSpreadsheet)";
-        header("Location: familias.php");
-        exit();
     }
+    header("Location: familias.php");
+    exit();
 }
 
-// Obtener todas las familias para mostrar en la tabla
+// Obtener familias con paginación y búsqueda
+$page = (int)($_GET['page'] ?? 1);
+$limit = 20;
+$offset = ($page - 1) * $limit;
+$search = $_GET['search'] ?? '';
+$estado_filter = $_GET['estado'] ?? 'activa';
+
+$where_conditions = ["estado = ?"];
+$params = [$estado_filter];
+
+if (!empty($search)) {
+    $where_conditions[] = "(nombre_jefe LIKE ? OR apellido_jefe LIKE ? OR dni_jefe LIKE ? OR direccion LIKE ? OR barrio LIKE ?)";
+    $search_param = "%$search%";
+    $params = array_merge($params, [$search_param, $search_param, $search_param, $search_param, $search_param]);
+}
+
+$where_clause = "WHERE " . implode(" AND ", $where_conditions);
+
 try {
-    $stmt = $pdo->query("SELECT * FROM familias ORDER BY nombre_jefe ASC");
-    $familias = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Contar total de registros
+    $stmt_count = $pdo->prepare("SELECT COUNT(*) FROM familias $where_clause");
+    $stmt_count->execute($params);
+    $total_records = $stmt_count->fetchColumn();
+    $total_pages = ceil($total_records / $limit);
+    
+    // Obtener familias
+    $stmt = $pdo->prepare("
+        SELECT 
+            f.*,
+            (SELECT COUNT(*) FROM asignaciones a 
+             JOIN personas p ON a.id_persona = p.id 
+             WHERE p.id_familia = f.id) as total_asignaciones,
+            (SELECT MAX(a.fecha_asignacion) FROM asignaciones a 
+             JOIN personas p ON a.id_persona = p.id 
+             WHERE p.id_familia = f.id) as ultima_asignacion
+        FROM familias f 
+        $where_clause
+        ORDER BY f.fecha_registro DESC 
+        LIMIT $limit OFFSET $offset
+    ");
+    $stmt->execute($params);
+    $familias = $stmt->fetchAll();
+    
 } catch (PDOException $e) {
     $error = "Error al cargar familias: " . $e->getMessage();
-    $familias = []; // Asegúrate de que $familias sea un array vacío en caso de error
+    $familias = [];
 }
 
-// Lógica para pre-llenar el formulario en modo edición
-$familia_a_editar = null;
-if (isset($_GET['action']) && $_GET['action'] === 'editar' && isset($_GET['id'])) {
-    $id_editar = $_GET['id'];
+// Obtener familia para editar
+$familia_editar = null;
+if (isset($_GET['editar'])) {
     try {
         $stmt = $pdo->prepare("SELECT * FROM familias WHERE id = ?");
-        $stmt->execute([$id_editar]);
-        $familia_a_editar = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$familia_a_editar) {
-            $error = "Familia no encontrada para edición.";
-        }
+        $stmt->execute([$_GET['editar']]);
+        $familia_editar = $stmt->fetch();
     } catch (PDOException $e) {
-        $error = "Error al cargar familia para edición: " . $e->getMessage();
+        $error = "Error al cargar familia para edición.";
     }
 }
 ?>
@@ -195,596 +184,440 @@ if (isset($_GET['action']) && $_GET['action'] === 'editar' && isset($_GET['id'])
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Familias - Desarrollo Social</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-    <style>
-        :root {
-            --primary-color: #0056b3; /* Un azul más oscuro para el sidebar y elementos principales */
-            --secondary-color: #007bff; /* Azul vibrante, usado para el hover general */
-            --background-color: #f4f7f6;
-            --card-background: #ffffff;
-            --text-color: #333;
-            --border-color: #ddd;
-            --shadow-color: rgba(0, 0, 0, 0.1);
-
-            /* Colores específicos de la imagen para el menú activo */
-            --sidebar-active-bg: #E0EFFF; /* Azul claro para el fondo activo del sidebar */
-            --sidebar-active-text: #0056b3; /* Azul oscuro para el texto activo */
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 0;
-        }
-
-        .wrapper {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        .sidebar {
-            width: 250px;
-            background-color: var(--primary-color);
-            color: white;
-            padding: 20px;
-            box-shadow: 2px 0 5px var(--shadow-color);
-            display: flex;
-            flex-direction: column; /* Para empujar el logout al final */
-        }
-
-        .sidebar h2 {
-            text-align: center;
-            margin-bottom: 30px;
-            color: white;
-        }
-
-        .sidebar ul {
-            list-style: none;
-            padding: 0;
-            flex-grow: 1; /* Permite que la lista de enlaces ocupe el espacio disponible */
-        }
-
-        .sidebar ul li {
-            margin-bottom: 15px;
-        }
-
-        .sidebar ul li a {
-            color: white;
-            text-decoration: none;
-            display: block;
-            padding: 10px 15px;
-            border-radius: 5px;
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        /* Estilos para el elemento de menú activo */
-        .sidebar ul li a.active {
-            background-color: var(--sidebar-active-bg); /* Fondo azul claro como en la imagen */
-            color: var(--sidebar-active-text); /* Texto azul oscuro */
-            font-weight: bold;
-        }
-
-        .sidebar ul li a:not(.active):hover { /* Solo aplica hover si no está activo */
-            background-color: rgba(255, 255, 255, 0.2); /* Un blanco transparente para hover en inactivos */
-        }
-
-        .main-content {
-            flex-grow: 1;
-            padding: 30px;
-        }
-
-        .header {
-            background-color: var(--card-background);
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header h1 {
-            margin: 0;
-            color: var(--primary-color);
-        }
-
-        .header .user-info {
-            font-weight: bold;
-        }
-
-        /* Botón de cerrar sesión en el sidebar */
-        .sidebar .btn-outline {
-            background-color: transparent;
-            border: 1px solid white;
-            color: white;
-            padding: 8px 15px;
-            border-radius: 5px;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            text-align: center;
-            margin-top: auto; /* Empuja el botón al final del sidebar */
-            display: block; /* Para que ocupe todo el ancho disponible */
-        }
-
-        .sidebar .btn-outline:hover {
-            background-color: white;
-            color: var(--primary-color);
-        }
-
-        .form-container, .table-container {
-            background-color: var(--card-background);
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
-            margin-bottom: 30px;
-        }
-
-        .form-container h2, .table-container h2 {
-            color: var(--primary-color);
-            margin-bottom: 20px;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 10px;
-        }
-
-        .form-group {
-            margin-bottom: 1rem; /* Espaciado estándar de Bootstrap */
-        }
-
-        .form-group label {
-            font-weight: bold;
-            margin-bottom: .5rem; /* Espaciado estándar de Bootstrap */
-            display: block;
-        }
-
-        .form-control {
-            border-radius: .25rem; /* Bordes ligeramente redondeados como en Bootstrap */
-            border: 1px solid var(--border-color);
-            padding: .375rem .75rem; /* Padding estándar de Bootstrap */
-            width: 100%;
-        }
-
-        .btn { /* Estilo base para todos los botones */
-            padding: .375rem .75rem; /* Padding estándar de Bootstrap */
-            border-radius: .25rem; /* Bordes ligeramente redondeados como en Bootstrap */
-            cursor: pointer;
-            transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-            display: inline-flex; /* Para alinear íconos y texto */
-            align-items: center; /* Centrar verticalmente el contenido */
-            justify-content: center; /* Centrar horizontalmente el contenido */
-            gap: 5px; /* Espacio entre icono y texto */
-            font-size: 1rem; /* Tamaño de fuente base */
-        }
-
-        .btn-primary {
-            background-color: var(--primary-color);
-            border-color: var(--primary-color);
-            color: white;
-        }
-        .btn-primary:hover {
-            background-color: #004494;
-            border-color: #004494;
-        }
-
-        .btn-secondary {
-            background-color: #6c757d;
-            border-color: #6c757d;
-            color: white;
-        }
-        .btn-secondary:hover {
-            background-color: #5a6268;
-            border-color: #545b62;
-        }
-
-        .btn-success {
-            background-color: #28a745;
-            border-color: #28a745;
-            color: white;
-        }
-        .btn-success:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
-        }
-
-        .btn-warning {
-            background-color: #ffc107;
-            border-color: #ffc107;
-            color: #333; /* Color oscuro para contraste con el amarillo */
-        }
-        .btn-warning:hover {
-            background-color: #e0a800;
-            border-color: #e0a800;
-        }
-
-        .btn-danger {
-            background-color: #dc3545;
-            border-color: #dc3545;
-            color: white;
-        }
-        .btn-danger:hover {
-            background-color: #c82333;
-            border-color: #bd2130;
-        }
-
-        .alert {
-            padding: 15px;
-            margin-bottom: 20px;
-            border: 1px solid transparent;
-            border-radius: 4px;
-        }
-
-        .alert-success {
-            color: #155724;
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-        }
-
-        .alert-danger {
-            color: #721c24;
-            background-color: #f8d7da;
-            border-color: #f5c6cb;
-        }
-
-        .table-responsive {
-            margin-top: 20px;
-        }
-
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .table thead th {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 10px;
-            text-align: left;
-        }
-
-        .table tbody td {
-            padding: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .table tbody tr:hover {
-            background-color: #f0f0f0;
-        }
-
-        .search-container {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-
-        .search-container .form-control {
-            flex-grow: 1;
-            margin-bottom: 0;
-        }
-
-        .no-results, .no-data-message {
-            text-align: center;
-            color: #666;
-            padding: 20px;
-            border: 1px dashed var(--border-color);
-            border-radius: 5px;
-            margin-top: 20px;
-        }
-
-        /* Estilos unificados para botones de importar/exportar */
-        .btn-file-action {
-            display: inline-flex;
-            background-color: #007bff; /* Azul vibrante */
-            color: white;
-            padding: 8px 15px; /* Ajustado para ser un poco más pequeño que los botones de acción principales */
-            border-radius: .25rem; /* Pequeño redondeo */
-            cursor: pointer;
-            transition: background-color 0.3s ease;
-            text-decoration: none;
-            align-items: center;
-            justify-content: center;
-            gap: 5px;
-            font-size: 0.9rem; /* Un poco más pequeño para estos botones */
-            border: 1px solid #007bff; /* Borde del mismo color */
-            min-width: 130px; /* Ancho mínimo para igualar si el texto varía */
-            box-sizing: border-box; /* Asegura que padding y border se incluyan en el width/height */
-            height: 38px; /* Altura explícita, ajusta si es necesario para que coincida con otros botones */
-        }
-
-        .btn-file-action:hover {
-            background-color: #0056b3; /* Azul oscuro al pasar el ratón */
-            border-color: #0056b3;
-        }
-
-        /* Oculta el input de tipo file original */
-        .file-input {
-            display: none;
-        }
-
-        /* Contenedor de botones de import/export para asegurar alineación */
-        .file-action-buttons {
-            display: flex;
-            gap: 10px; /* Espacio entre los botones */
-            align-items: center; /* Asegura que estén a la misma altura */
-            flex-wrap: wrap; /* Permite que los botones salten de línea en pantallas pequeñas */
-        }
-
-    </style>
+    <title>Gestión de Familias - Sistema de Desarrollo Social</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="assets/css/sistema.css" rel="stylesheet">
 </head>
 <body>
-    <div class="wrapper">
-        <div class="sidebar">
-            <h2>Gestión Social</h2>
-            <ul>
-                <li><a href="dashboard.php"><i class="fas fa-home"></i> Inicio</a></li>
-                <li><a href="personas.php"><i class="fas fa-users"></i> Personas</a></li>
-                <li><a href="familias.php" class="active"><i class="fas fa-people-arrows"></i> Familias</a></li>
-                <li><a href="ayudas.php"><i class="fas fa-hands-helping"></i> Ayudas</a></li>
-                <li><a href="asignaciones.php"><i class="fas fa-file-invoice"></i> Asignaciones</a></li>
-                <?php if ($user_role === 'admin'): ?>
-                    <li><a href="dashboard.php?section=usuarios"><i class="fas fa-cogs"></i> Configuración</a></li>
-                <?php endif; ?>
-            </ul>
-            <a href="logout.php" class="btn btn-outline"><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</a>
+    <!-- Sidebar -->
+    <?php include 'includes/sidebar.php'; ?>
+
+    <div class="main-content">
+        <!-- Header -->
+        <div class="header-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="mb-1"><i class="fas fa-users me-2 text-primary"></i>Gestión de Familias</h1>
+                    <p class="text-muted mb-0">Registro y administración de familias beneficiarias</p>
+                </div>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#familiaModal">
+                    <i class="fas fa-plus me-2"></i>Nueva Familia
+                </button>
+            </div>
         </div>
 
-        <div class="main-content">
-            <div class="header">
-                <h1>Gestión de Familias</h1>
-                <div class="user-info">
-                    Bienvenido, <?php echo htmlspecialchars($_SESSION['username'] ?? 'Usuario'); ?>
-                    <br>
-                    Rol: <span style="text-transform: capitalize;"><?php echo htmlspecialchars($user_role); ?></span>
-                </div>
-            </div>
+        <!-- Alertas -->
+        <?php if ($mensaje): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle me-2"></i>
+            <?php echo htmlspecialchars($mensaje); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
 
-            <?php if ($mensaje): ?>
-                <div class="alert alert-success" role="alert">
-                    <?php echo htmlspecialchars($mensaje); ?>
-                </div>
-            <?php endif; ?>
+        <?php if ($error): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <?php echo htmlspecialchars($error); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
 
-            <?php if ($error): ?>
-                <div class="alert alert-danger" role="alert">
-                    <?php echo htmlspecialchars($error); ?>
-                </div>
-            <?php endif; ?>
-
-            <div class="form-container">
-                <h2><?php echo ($familia_a_editar ? 'Editar Familia' : 'Agregar Nueva Familia'); ?></h2>
-                <form action="familias.php" method="POST">
-                    <?php if ($familia_a_editar): ?>
-                        <input type="hidden" name="familia_id" value="<?php echo htmlspecialchars($familia_a_editar['id']); ?>">
-                    <?php endif; ?>
-                    <div class="form-row">
-                        <div class="form-group col-md-6">
-                            <label for="nombre_jefe">Nombre del Jefe de Familia:</label>
-                            <input type="text" class="form-control" id="nombre_jefe" name="nombre_jefe" required value="<?php echo htmlspecialchars($familia_a_editar['nombre_jefe'] ?? ''); ?>">
-                        </div>
-                        <div class="form-group col-md-6">
-                            <label for="dni_jefe">DNI del Jefe de Familia:</label>
-                            <input type="text" class="form-control" id="dni_jefe" name="dni_jefe" required value="<?php echo htmlspecialchars($familia_a_editar['dni_jefe'] ?? ''); ?>" pattern="\d*" title="Solo se permiten números">
+        <!-- Filtros y búsqueda -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="GET" class="row g-3">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" name="search" 
+                                   placeholder="Buscar por nombre, DNI, dirección o barrio..." 
+                                   value="<?php echo htmlspecialchars($search); ?>">
                         </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group col-md-6">
-                            <label for="direccion">Dirección:</label>
-                            <input type="text" class="form-control" id="direccion" name="direccion" value="<?php echo htmlspecialchars($familia_a_editar['direccion'] ?? ''); ?>">
-                        </div>
-                        <div class="form-group col-md-6">
-                            <label for="telefono">Teléfono:</label>
-                            <input type="text" class="form-control" id="telefono" name="telefono" value="<?php echo htmlspecialchars($familia_a_editar['telefono'] ?? ''); ?>">
+                    <div class="col-md-3">
+                        <select class="form-select" name="estado">
+                            <option value="activa" <?php echo $estado_filter === 'activa' ? 'selected' : ''; ?>>Familias Activas</option>
+                            <option value="inactiva" <?php echo $estado_filter === 'inactiva' ? 'selected' : ''; ?>>Familias Inactivas</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-outline-primary flex-fill">
+                                <i class="fas fa-search me-1"></i>Buscar
+                            </button>
+                            <a href="familias.php" class="btn btn-outline-secondary">
+                                <i class="fas fa-times"></i>
+                            </a>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label for="integrantes">Número de Integrantes:</label>
-                        <input type="number" class="form-control" id="integrantes" name="integrantes" required min="1" value="<?php echo htmlspecialchars($familia_a_editar['integrantes'] ?? 1); ?>">
-                    </div>
-                    <button type="submit" name="<?php echo ($familia_a_editar ? 'editar_familia' : 'agregar_familia'); ?>" class="btn btn-primary">
-                        <?php echo ($familia_a_editar ? '<i class="fas fa-sync-alt"></i> Actualizar Familia' : '<i class="fas fa-plus"></i> Agregar Familia'); ?>
-                    </button>
-                    <?php if ($familia_a_editar): ?>
-                        <a href="familias.php" class="btn btn-secondary"><i class="fas fa-times"></i> Cancelar Edición</a>
-                    <?php endif; ?>
                 </form>
             </div>
+        </div>
 
-            <div class="table-container">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h2>Listado de Familias</h2>
-                    <div class="file-action-buttons"> <form action="familias.php" method="POST" enctype="multipart/form-data" class="d-flex align-items-center">
-                            <button type="button" id="importXlsTriggerBtnFamilias" class="btn-file-action">
-                                <i class="fas fa-upload"></i> Importar XLS
-                            </button>
-                            <input type="file" name="xlsFileFamilias" id="xlsFileFamilias" class="file-input" accept=".xls, .xlsx">
-                            <button type="submit" name="importar_familias_xls" id="submitImportFamilias" style="display: none;"></button>
-                        </form>
-                        <form action="familias.php" method="POST" class="d-flex align-items-center">
-                            <button type="submit" name="exportar_familias_xls" class="btn-file-action">
-                                <i class="fas fa-download"></i> Exportar XLS
-                            </button>
-                        </form>
-                    </div>
+        <!-- Tabla de familias -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list me-2"></i>Listado de Familias 
+                    <span class="badge bg-primary ms-2"><?php echo number_format($total_records); ?></span>
+                </h5>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-success" onclick="exportarDatos('excel')">
+                        <i class="fas fa-file-excel me-1"></i>Excel
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="exportarDatos('pdf')">
+                        <i class="fas fa-file-pdf me-1"></i>PDF
+                    </button>
                 </div>
-
-                <div class="search-container">
-                    <input type="text" id="searchInput" class="form-control" placeholder="Buscar por nombre o DNI de jefe...">
-                    <button id="clearSearchBtn" class="btn btn-secondary" style="display: none;"><i class="fas fa-times"></i></button>
-                </div>
-
+            </div>
+            <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-striped table-hover" id="familiasTable">
-                        <thead>
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
                             <tr>
-                                <th>Nombre Jefe</th>
-                                <th>DNI Jefe</th>
-                                <th>Dirección</th>
-                                <th>Teléfono</th>
+                                <th>Jefe de Familia</th>
+                                <th>DNI</th>
+                                <th>Contacto</th>
+                                <th>Ubicación</th>
                                 <th>Integrantes</th>
-                                <th>Fecha Registro</th>
-                                <th>Acciones</th>
+                                <th>Asignaciones</th>
+                                <th>Estado</th>
+                                <th>Última Actividad</th>
+                                <th width="120">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (!empty($familias)): ?>
                                 <?php foreach ($familias as $familia): ?>
-                                    <tr data-nombre="<?php echo htmlspecialchars(strtolower($familia['nombre_jefe'])); ?>" data-dni="<?php echo htmlspecialchars(strtolower($familia['dni_jefe'])); ?>">
-                                        <td><?php echo htmlspecialchars($familia['nombre_jefe']); ?></td>
-                                        <td><?php echo htmlspecialchars($familia['dni_jefe']); ?></td>
-                                        <td><?php echo htmlspecialchars($familia['direccion']); ?></td>
-                                        <td><?php echo htmlspecialchars($familia['telefono']); ?></td>
-                                        <td><?php echo htmlspecialchars($familia['integrantes']); ?></td>
-                                        <td><?php echo htmlspecialchars(date('d/m/Y', strtotime($familia['fecha_registro']))); ?></td>
-                                        <td>
-                                            <a href="familias.php?action=editar&id=<?php echo htmlspecialchars($familia['id']); ?>" class="btn btn-warning btn-sm">
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar-sm bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-2">
+                                                <?php echo strtoupper(substr($familia['nombre_jefe'], 0, 1) . substr($familia['apellido_jefe'], 0, 1)); ?>
+                                            </div>
+                                            <div>
+                                                <strong><?php echo htmlspecialchars($familia['nombre_jefe'] . ' ' . $familia['apellido_jefe']); ?></strong>
+                                                <br><small class="text-muted">Reg: <?php echo formatearFecha($familia['fecha_registro']); ?></small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace"><?php echo htmlspecialchars($familia['dni_jefe']); ?></span>
+                                    </td>
+                                    <td>
+                                        <?php if (!empty($familia['telefono'])): ?>
+                                            <i class="fas fa-phone text-success me-1"></i>
+                                            <?php echo htmlspecialchars($familia['telefono']); ?>
+                                        <?php else: ?>
+                                            <span class="text-muted">Sin teléfono</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <div>
+                                            <?php if (!empty($familia['direccion'])): ?>
+                                                <small class="d-block"><?php echo htmlspecialchars($familia['direccion']); ?></small>
+                                            <?php endif; ?>
+                                            <?php if (!empty($familia['barrio'])): ?>
+                                                <span class="badge bg-light text-dark"><?php echo htmlspecialchars($familia['barrio']); ?></span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-info"><?php echo $familia['cantidad_integrantes']; ?> persona<?php echo $familia['cantidad_integrantes'] != 1 ? 's' : ''; ?></span>
+                                    </td>
+                                    <td>
+                                        <?php if ($familia['total_asignaciones'] > 0): ?>
+                                            <span class="badge bg-success"><?php echo $familia['total_asignaciones']; ?></span>
+                                            <?php if ($familia['ultima_asignacion']): ?>
+                                                <br><small class="text-muted">Última: <?php echo formatearFecha($familia['ultima_asignacion']); ?></small>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <span class="text-muted">Sin asignaciones</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-<?php echo $familia['estado'] === 'activa' ? 'success' : 'secondary'; ?>">
+                                            <?php echo ucfirst($familia['estado']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <small class="text-muted"><?php echo formatearFecha($familia['fecha_registro']); ?></small>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary btn-sm" 
+                                                    onclick="editarFamilia(<?php echo $familia['id']; ?>)"
+                                                    title="Editar">
                                                 <i class="fas fa-edit"></i>
+                                            </button>
+                                            <a href="asignaciones.php?familia=<?php echo $familia['id']; ?>" 
+                                               class="btn btn-outline-success btn-sm" title="Ver Asignaciones">
+                                                <i class="fas fa-gift"></i>
                                             </a>
-                                            <form action="familias.php" method="POST" style="display:inline-block;" onsubmit="return confirm('¿Estás seguro de eliminar esta familia? Se eliminarán también las personas asociadas.');">
-                                                <input type="hidden" name="familia_id" value="<?php echo htmlspecialchars($familia['id']); ?>">
-                                                <button type="submit" name="eliminar_familia" class="btn btn-danger btn-sm">
-                                                    <i class="fas fa-trash-alt"></i>
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
+                                            <?php if ($user_role === 'admin'): ?>
+                                            <button class="btn btn-outline-danger btn-sm" 
+                                                    onclick="eliminarFamilia(<?php echo $familia['id']; ?>, '<?php echo htmlspecialchars($familia['nombre_jefe'] . ' ' . $familia['apellido_jefe']); ?>')"
+                                                    title="Eliminar">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
-                                <tr id="noDataMessage">
-                                    <td colspan="7" class="text-center">No hay familias registradas aún.</td>
+                                <tr>
+                                    <td colspan="9" class="text-center py-4">
+                                        <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                                        <p class="text-muted">No se encontraron familias</p>
+                                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#familiaModal">
+                                            <i class="fas fa-plus me-2"></i>Registrar Primera Familia
+                                        </button>
+                                    </td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
-                    <div id="noResults" class="no-results" style="display: none;">No se encontraron resultados para su búsqueda.</div>
+                </div>
+            </div>
+            
+            <!-- Paginación -->
+            <?php if ($total_pages > 1): ?>
+            <div class="card-footer">
+                <nav aria-label="Paginación de familias">
+                    <ul class="pagination pagination-sm justify-content-center mb-0">
+                        <?php if ($page > 1): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&estado=<?php echo $estado_filter; ?>">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
+                            <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
+                                <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&estado=<?php echo $estado_filter; ?>">
+                                    <?php echo $i; ?>
+                                </a>
+                            </li>
+                        <?php endfor; ?>
+                        
+                        <?php if ($page < $total_pages): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&estado=<?php echo $estado_filter; ?>">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        <?php endif; ?>
+                    </ul>
+                </nav>
+                <div class="text-center mt-2">
+                    <small class="text-muted">
+                        Mostrando <?php echo min($offset + 1, $total_records); ?> - <?php echo min($offset + $limit, $total_records); ?> 
+                        de <?php echo number_format($total_records); ?> familias
+                    </small>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Modal para agregar/editar familia -->
+    <div class="modal fade" id="familiaModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-users me-2"></i>
+                        <span id="modalTitle">Nueva Familia</span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="familiaForm" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="accion" id="accion" value="agregar">
+                        <input type="hidden" name="familia_id" id="familia_id">
+                        <input type="hidden" name="csrf_token" value="<?php echo generarTokenCSRF(); ?>">
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="nombre_jefe" class="form-label">Nombre del Jefe de Familia *</label>
+                                    <input type="text" class="form-control" id="nombre_jefe" name="nombre_jefe" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="apellido_jefe" class="form-label">Apellido del Jefe de Familia *</label>
+                                    <input type="text" class="form-control" id="apellido_jefe" name="apellido_jefe" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="dni_jefe" class="form-label">DNI *</label>
+                                    <input type="text" class="form-control" id="dni_jefe" name="dni_jefe" 
+                                           pattern="[0-9]{7,8}" maxlength="8" required>
+                                    <div class="form-text">Ingrese DNI sin puntos ni espacios</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="telefono" class="form-label">Teléfono</label>
+                                    <input type="tel" class="form-control" id="telefono" name="telefono">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="direccion" class="form-label">Dirección</label>
+                                    <input type="text" class="form-control" id="direccion" name="direccion">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="barrio" class="form-label">Barrio</label>
+                                    <input type="text" class="form-control" id="barrio" name="barrio">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="cantidad_integrantes" class="form-label">Cantidad de Integrantes *</label>
+                                    <input type="number" class="form-control" id="cantidad_integrantes" 
+                                           name="cantidad_integrantes" min="1" max="20" value="1" required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="fas fa-times me-2"></i>Cancelar
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            <span id="btnSubmitText">Guardar Familia</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para eliminar -->
+    <div class="modal fade" id="eliminarModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Eliminación</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>¿Está seguro que desea desactivar la familia <strong id="familiaEliminar"></strong>?</p>
+                    <p class="text-muted small">Esta acción cambiará el estado de la familia a "inactiva" pero conservará todos los registros históricos.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form method="POST" style="display: inline;">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="familia_id" id="familiaIdEliminar">
+                        <input type="hidden" name="csrf_token" value="<?php echo generarTokenCSRF(); ?>">
+                        <button type="submit" class="btn btn-danger">
+                            <i class="fas fa-trash me-2"></i>Desactivar Familia
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Auto-capitalizar nombres
         document.addEventListener('DOMContentLoaded', function() {
-            // Función para capitalizar la primera letra de cada palabra
-            function capitalizarInput(inputElementId) {
-                const input = document.getElementById(inputElementId);
+            const campos = ['nombre_jefe', 'apellido_jefe', 'direccion', 'barrio'];
+            campos.forEach(campo => {
+                const input = document.getElementById(campo);
                 if (input) {
                     input.addEventListener('input', function() {
-                        const words = this.value.split(' ');
-                        const capitalizedWords = words.map(word => {
-                            if (word.length > 0) {
-                                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-                            }
-                            return word;
-                        });
-                        this.value = capitalizedWords.join(' ');
+                        this.value = this.value.replace(/\b\w/g, l => l.toUpperCase());
                     });
                 }
-            }
-
-            capitalizarInput('nombre_jefe');
-
-            // --- Lógica de búsqueda ---
-            const searchInput = document.getElementById('searchInput');
-            const clearSearchBtn = document.getElementById('clearSearchBtn');
-            const familiasTableBody = document.querySelector('#familiasTable tbody');
-            const noResultsDiv = document.getElementById('noResults');
-            const noDataMessage = document.getElementById('noDataMessage'); // El mensaje "No hay familias registradas aún"
-
-            function realizarBusqueda() {
-                const searchTerm = searchInput.value.toLowerCase().trim();
-                let visibleRows = 0;
-
-                // Ocultar el mensaje "No hay familias registradas aún" si hay filas o se está buscando
-                if (noDataMessage) {
-                    noDataMessage.style.display = 'none';
-                }
-
-                Array.from(familiasTableBody.rows).forEach(row => {
-                    // Excluir la fila 'noDataMessage' de la búsqueda
-                    if (row.id === 'noDataMessage') {
-                        row.style.display = 'none'; // Asegurarse de que esté oculta durante la búsqueda
-                        return;
-                    }
-
-                    const nombreJefe = row.dataset.nombre;
-                    const dniJefe = row.dataset.dni;
-
-                    if (nombreJefe.includes(searchTerm) || dniJefe.includes(searchTerm)) {
-                        row.style.display = ''; // Mostrar fila
-                        visibleRows++;
-                    } else {
-                        row.style.display = 'none'; // Ocultar fila
-                    }
-                });
-
-                // Mostrar/ocultar mensaje de "No se encontraron resultados"
-                if (visibleRows === 0 && searchTerm !== '') {
-                    noResultsDiv.style.display = 'block';
-                } else {
-                    noResultsDiv.style.display = 'none';
-                }
-
-                // Si no hay búsqueda activa y no hay resultados iniciales (tabla vacía), mostrar el mensaje "No hay familias registradas"
-                if (searchTerm === '' && visibleRows === 0 && noDataMessage) {
-                     noDataMessage.style.display = 'table-row'; // Mostrar la fila de no datos si la tabla está vacía y no hay búsqueda
-                }
-            }
-
-            function limpiarBusqueda() {
-                searchInput.value = '';
-                clearSearchBtn.style.display = 'none';
-                realizarBusqueda();
-            }
-
-            searchInput.addEventListener('input', function() {
-                if (this.value.trim() !== '') {
-                    clearSearchBtn.style.display = 'inline-block';
-                } else {
-                    clearSearchBtn.style.display = 'none';
-                }
-                realizarBusqueda();
             });
-
-            clearSearchBtn.addEventListener('click', limpiarBusqueda);
-
-            // Asegurarse de que el botón de limpiar esté visible si ya hay texto en el input al cargar la página
-            if (searchInput.value.trim() !== '') {
-                clearSearchBtn.style.display = 'inline-block';
-            }
-
-            // Ejecutar la búsqueda inicial para manejar el estado de la tabla (vacía o con datos)
-            realizarBusqueda();
-
-            // --- Manejo del archivo XLS para Familias ---
-            const importXlsTriggerBtnFamilias = document.getElementById('importXlsTriggerBtnFamilias'); // Nuevo botón visible
-            const xlsFileFamiliasInput = document.getElementById('xlsFileFamilias');
-            const submitImportFamilias = document.getElementById('submitImportFamilias');
-
-            if (importXlsTriggerBtnFamilias && xlsFileFamiliasInput && submitImportFamilias) {
-                // Cuando se hace clic en el botón visible, activa el input de archivo oculto
-                importXlsTriggerBtnFamilias.addEventListener('click', function() {
-                    xlsFileFamiliasInput.click();
-                });
-
-                // Cuando se selecciona un archivo en el input (incluso si fue activado por el botón)
-                xlsFileFamiliasInput.addEventListener('change', function() {
-                    if (this.files.length > 0) {
-                        const fileName = this.files[0].name;
-                        if (confirm(`¿Estás seguro de que deseas importar el archivo \"${fileName}\"?\n\nEl archivo XLS (compatible con Excel) debe tener las columnas (en orden): Nombre_Jefe, DNI_Jefe, Direccion, Telefono, Integrantes.`)) {
-                            submitImportFamilias.click(); // Dispara el clic en el botón oculto para enviar el formulario
-                        } else {
-                            this.value = ''; // Limpiar la selección del archivo si el usuario cancela
-                        }
-                    }
-                });
-            }
+            
+            // Solo números para DNI
+            document.getElementById('dni_jefe').addEventListener('input', function() {
+                this.value = this.value.replace(/\D/g, '');
+            });
         });
+
+        function editarFamilia(id) {
+            // Hacer petición AJAX para obtener datos de la familia
+            fetch(`api/familia.php?id=${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const familia = data.familia;
+                        
+                        document.getElementById('modalTitle').textContent = 'Editar Familia';
+                        document.getElementById('btnSubmitText').textContent = 'Actualizar Familia';
+                        document.getElementById('accion').value = 'editar';
+                        document.getElementById('familia_id').value = familia.id;
+                        
+                        document.getElementById('nombre_jefe').value = familia.nombre_jefe || '';
+                        document.getElementById('apellido_jefe').value = familia.apellido_jefe || '';
+                        document.getElementById('dni_jefe').value = familia.dni_jefe || '';
+                        document.getElementById('telefono').value = familia.telefono || '';
+                        document.getElementById('direccion').value = familia.direccion || '';
+                        document.getElementById('barrio').value = familia.barrio || '';
+                        document.getElementById('cantidad_integrantes').value = familia.cantidad_integrantes || 1;
+                        
+                        new bootstrap.Modal(document.getElementById('familiaModal')).show();
+                    } else {
+                        alert('Error al cargar los datos de la familia');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error al cargar los datos');
+                });
+        }
+
+        function eliminarFamilia(id, nombre) {
+            document.getElementById('familiaEliminar').textContent = nombre;
+            document.getElementById('familiaIdEliminar').value = id;
+            new bootstrap.Modal(document.getElementById('eliminarModal')).show();
+        }
+
+        function exportarDatos(formato) {
+            const params = new URLSearchParams(window.location.search);
+            params.set('export', formato);
+            window.open(`api/export_familias.php?${params.toString()}`, '_blank');
+        }
+
+        // Limpiar formulario al cerrar modal
+        document.getElementById('familiaModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('familiaForm').reset();
+            document.getElementById('modalTitle').textContent = 'Nueva Familia';
+            document.getElementById('btnSubmitText').textContent = 'Guardar Familia';
+            document.getElementById('accion').value = 'agregar';
+            document.getElementById('familia_id').value = '';
+        });
+
+        <?php if ($familia_editar): ?>
+        // Si hay una familia para editar, abrir el modal automáticamente
+        document.addEventListener('DOMContentLoaded', function() {
+            editarFamilia(<?php echo $familia_editar['id']; ?>);
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>

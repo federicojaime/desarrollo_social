@@ -27,12 +27,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <title>Iniciar Sesión - Desarrollo Social</title>
-    <link rel="stylesheet" href="index.php/styles.css">
+    <link rel="stylesheet" href="../assets/css/styles.css">
+    <style>
+        body {
+            background: linear-gradient(135deg,rgba(24, 67, 185, 0.96) 0%,rgb(21, 51, 187) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .logo-muni {
+            display: block;
+            margin: 0 auto 20px auto;
+            max-width: 120px;
+        }
+    </style>
 </head>
 <body>
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
+                <img src="../assets/img/muni_sf.png" alt="Logo Municipalidad" class="logo-muni">
                 <h2>Desarrollo Social</h2>
                 <p style="color: var(--text-secondary);">Inicia sesión para continuar</p>
             </div>
@@ -54,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <button type="submit" class="btn btn-primary btn-full">Iniciar Sesión</button>
                 <p style="text-align:center; margin-top: 15px;">
-                    <a href="crear_usuario.php">¿No tienes cuenta? Crear usuario</a>
+                    <a href="../register.php">¿No tienes cuenta? Crear usuario</a>
                 </p>
             </form>
         </div>

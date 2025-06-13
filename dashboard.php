@@ -1,105 +1,141 @@
 <?php
 session_start();
+require 'includes/conexion.php';
+
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// Incluir el archivo de conexión a la base de datos
-// Asegúrate de que 'includes/conexion.php' exista y contenga la conexión $pdo
-require 'includes/conexion.php'; 
+$user_role = $_SESSION['rol'] ?? 'empleado';
+$mensaje = '';
+$error = '';
 
-$mensaje = "";
-$error = "";
-$mostrar_formulario_usuarios = false; // Variable para controlar la visibilidad del formulario de usuarios
-
-// Obtener el rol del usuario logueado desde la sesión
-// IMPORTANTE: Asegúrate de que la clave de sesión 'rol' sea la correcta que usas al iniciar sesión
-// Y que el valor para los administradores en la DB sea 'admin'
-$user_role = $_SESSION['rol'] ?? 'empleado'; // 'empleado' por defecto si no está definido
-
-// Lógica para mostrar el formulario de agregar usuarios si se accede desde "Configuración"
-// Se compara con 'admin' en lugar de 'administrador'
-if (isset($_GET['section']) && $_GET['section'] === 'usuarios' && $user_role === 'admin') {
-    $mostrar_formulario_usuarios = true;
+// Recuperar mensajes
+if (isset($_SESSION['mensaje'])) {
+    $mensaje = $_SESSION['mensaje'];
+    unset($_SESSION['mensaje']);
+}
+if (isset($_SESSION['error'])) {
+    $error = $_SESSION['error'];
+    unset($_SESSION['error']);
 }
 
 try {
-    // --- Obtener conteos para las tarjetas de resumen ---
-    $personas_count = $pdo->query("SELECT COUNT(*) FROM personas")->fetchColumn();
-    $familias_count = $pdo->query("SELECT COUNT(*) FROM familias")->fetchColumn();
-    $ayudas_count = $pdo->query("SELECT COUNT(*) FROM ayudas")->fetchColumn();
-    $asignaciones_count = $pdo->query("SELECT COUNT(*) FROM asignaciones")->fetchColumn();
-
-    // --- Obtener las últimas personas registradas recientemente ---
-    $stmt_recent_personas = $pdo->prepare("
-        SELECT
-            nombre,
-            apellido,
-            cedula AS cedula,
-            fecha_registro
-        FROM personas
-        ORDER BY fecha_registro DESC
-        LIMIT 3
+    // Estadísticas generales
+    $stats = [];
+    
+    // Total de familias activas
+    $stmt = $pdo->query("SELECT COUNT(*) FROM familias WHERE estado = 'activa' OR estado IS NULL");
+    $stats['familias_activas'] = $stmt->fetchColumn();
+    
+    // Total de asignaciones este mes
+    $stmt = $pdo->query("
+        SELECT COUNT(*) FROM asignaciones 
+        WHERE YEAR(fecha_asignacion) = YEAR(CURDATE()) 
+        AND MONTH(fecha_asignacion) = MONTH(CURDATE())
     ");
-    $stmt_recent_personas->execute();
-    $recent_personas = $stmt_recent_personas->fetchAll(PDO::FETCH_ASSOC);
+    $stats['asignaciones_mes'] = $stmt->fetchColumn();
+    
+    // Asignaciones pendientes
+    $stmt = $pdo->query("SELECT COUNT(*) FROM asignaciones WHERE estado = 'pendiente' OR estado IS NULL");
+    $stats['asignaciones_pendientes'] = $stmt->fetchColumn();
+    
+    // Total de tipos de ayuda
+    $stmt = $pdo->query("SELECT COUNT(*) FROM ayudas");
+    $stats['tipos_ayuda'] = $stmt->fetchColumn();
+    
+    // Últimas 5 asignaciones
+    $stmt = $pdo->query("
+        SELECT 
+            a.id,
+            a.fecha_asignacion,
+            COALESCE(a.estado, 'pendiente') as estado,
+            COALESCE(a.prioridad, 'media') as prioridad,
+            a.numero_expediente,
+            COALESCE(f.nombre_jefe, b.nombre, p.nombre, 'N/A') as beneficiario,
+            COALESCE(f.apellido_jefe, b.apellido, '', '') as apellido_beneficiario,
+            COALESCE(ay.nombre_ayuda, 'Ayuda no especificada') as nombre_ayuda,
+            u.nombre as usuario_nombre
+        FROM asignaciones a
+        LEFT JOIN familias f ON a.familia_id = f.id
+        LEFT JOIN personas p ON a.id_persona = p.id
+        LEFT JOIN beneficiarios b ON a.beneficiario_id = b.id
+        LEFT JOIN ayudas ay ON a.id_ayuda = ay.id
+        LEFT JOIN usuarios u ON a.usuario_asignador = u.id
+        ORDER BY a.fecha_creacion DESC
+        LIMIT 5
+    ");
+    $ultimas_asignaciones = $stmt->fetchAll();
+    
+    // Asignaciones por estado (para gráfico)
+    $stmt = $pdo->query("
+        SELECT 
+            COALESCE(estado, 'pendiente') as estado, 
+            COUNT(*) as cantidad 
+        FROM asignaciones 
+        WHERE fecha_asignacion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        GROUP BY COALESCE(estado, 'pendiente')
+    ");
+    $asignaciones_por_estado = $stmt->fetchAll();
+    
+    // Top 5 ayudas más solicitadas
+    $stmt = $pdo->query("
+        SELECT 
+            ay.nombre_ayuda,
+            COUNT(*) as cantidad
+        FROM asignaciones a
+        JOIN ayudas ay ON a.id_ayuda = ay.id
+        WHERE a.fecha_asignacion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        GROUP BY ay.id, ay.nombre_ayuda
+        ORDER BY cantidad DESC
+        LIMIT 5
+    ");
+    $top_ayudas = $stmt->fetchAll();
+    
+} catch (PDOException $e) {
+    $error = "Error al cargar estadísticas: " . $e->getMessage();
+}
 
-    // --- Lógica para agregar un nuevo usuario (solo para admins) ---
-    // Se compara con 'admin' en lugar de 'administrador'
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $user_role === 'admin' && isset($_POST['agregar_usuario'])) {
-        $nombre = trim($_POST['nombre']);
-        $apellido = trim($_POST['apellido']);
-        $email = trim($_POST['email']);
-        $usuario = trim($_POST['usuario']);
-        $contraseña = $_POST['contraseña']; // La contraseña se hashea antes de guardar
-        $tipo_usuario = $_POST['tipo_usuario'];
+// Manejo de agregar usuario (solo admins)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $user_role === 'admin' && isset($_POST['agregar_usuario'])) {
+    $nombre = limpiarEntrada($_POST['nombre']);
+    $apellido = limpiarEntrada($_POST['apellido']);
+    $email = limpiarEntrada($_POST['email']);
+    $usuario = limpiarEntrada($_POST['usuario']);
+    $contraseña = $_POST['contraseña'];
+    $rol = $_POST['rol'];
 
-        // Validación básica de campos
-        if (empty($nombre) || empty($apellido) || empty($email) || empty($usuario) || empty($contraseña) || empty($tipo_usuario)) {
-            $error = "Todos los campos son obligatorios.";
-        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = "El formato del email no es válido.";
-        } else {
-            // Verificar si el usuario o email ya existen para evitar duplicados
+    if (empty($nombre) || empty($apellido) || empty($usuario) || empty($contraseña)) {
+        $_SESSION['error'] = "Todos los campos son obligatorios.";
+    } else {
+        try {
             $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE usuario = ? OR email = ?");
             $stmt_check->execute([$usuario, $email]);
+            
             if ($stmt_check->fetchColumn() > 0) {
-                $error = "El nombre de usuario o el email ya están registrados.";
+                $_SESSION['error'] = "El usuario o email ya existe.";
             } else {
-                // Hashear la contraseña antes de guardarla en la base de datos por seguridad
-                $hashed_password = password_hash($contraseña, PASSWORD_DEFAULT);
-
-                // Insertar el nuevo usuario en la tabla 'usuarios'
-                // Asegúrate de que tu tabla 'usuarios' tenga las columnas: id, nombre, apellido, email, usuario, contraseña, rol
-                $stmt_insert = $pdo->prepare("INSERT INTO usuarios (nombre, apellido, email, usuario, contraseña, rol) VALUES (?, ?, ?, ?, ?, ?)");
-                if ($stmt_insert->execute([$nombre, $apellido, $email, $usuario, $hashed_password, $tipo_usuario])) {
-                    $mensaje = "Usuario registrado exitosamente.";
-                    // Limpiar los campos del formulario después del éxito (opcional)
-                    $_POST = []; // Esto limpia todos los POST, se podría hacer más específico
-                    // Redirigir para evitar re-envío del formulario al recargar
-                    header("Location: dashboard.php?section=usuarios&msg=" . urlencode($mensaje));
-                    exit();
-                } else {
-                    $error = "Error al registrar el usuario. Intente nuevamente.";
+                $contraseña_hash = password_hash($contraseña, PASSWORD_DEFAULT);
+                $stmt = $pdo->prepare("
+                    INSERT INTO usuarios (nombre, apellido, email, usuario, contraseña, rol) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([$nombre, $apellido, $email, $usuario, $contraseña_hash, $rol]);
+                
+                if (function_exists('registrarLog')) {
+                    registrarLog($pdo, 'usuarios', $pdo->lastInsertId(), 'crear', 
+                        "Usuario creado: $nombre $apellido", $_SESSION['user_id']);
                 }
+                
+                $_SESSION['mensaje'] = "Usuario creado exitosamente.";
             }
+        } catch (PDOException $e) {
+            $_SESSION['error'] = "Error al crear usuario: " . $e->getMessage();
         }
-        // Si hay un error al agregar usuario, asegurarse de que el formulario siga visible
-        $mostrar_formulario_usuarios = true;
     }
-
-    // Recuperar mensajes de la URL después de una redirección (para agregar usuario)
-    if (isset($_GET['msg'])) {
-        $mensaje = htmlspecialchars($_GET['msg']);
-    }
-    if (isset($_GET['err'])) {
-        $error = htmlspecialchars($_GET['err']);
-    }
-
-} catch (PDOException $e) {
-    // Manejo de errores de conexión o consulta a la base de datos
-    $error = "Error de base de datos: " . $e->getMessage();
+    header("Location: dashboard.php");
+    exit();
 }
 ?>
 
@@ -108,408 +144,421 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Control - Desarrollo Social</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <title>Dashboard - Sistema de Desarrollo Social</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #0056b3; /* Un azul más oscuro */
-            --secondary-color: #007bff; /* Azul vibrante */
-            --background-color: #f4f7f6;
-            --card-background: #ffffff;
-            --text-color: #333;
-            --border-color: #ddd;
-            --shadow-color: rgba(0, 0, 0, 0.1);
+            --primary-color: #2563eb;
+            --secondary-color: #64748b;
+            --success-color: #059669;
+            --warning-color: #d97706;
+            --danger-color: #dc2626;
+            --info-color: #0891b2;
+            --light-color: #f8fafc;
+            --dark-color: #1e293b;
+            --sidebar-width: 280px;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 0;
-        }
-
-        .wrapper {
-            display: flex;
-            min-height: 100vh;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--light-color);
+            overflow-x: hidden;
         }
 
         .sidebar {
-            width: 250px;
-            background-color: var(--primary-color);
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: var(--sidebar-width);
+            background: linear-gradient(180deg, var(--primary-color) 0%, #1d4ed8 100%);
             color: white;
-            padding: 20px;
-            box-shadow: 2px 0 5px var(--shadow-color);
+            z-index: 1000;
+            transition: transform 0.3s ease;
+            overflow-y: auto;
         }
 
-        .sidebar h2 {
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             text-align: center;
-            margin-bottom: 30px;
-            color: white;
         }
 
-        .sidebar ul {
-            list-style: none;
-            padding: 0;
+        .sidebar-header h4 {
+            margin: 0;
+            font-weight: 600;
         }
 
-        .sidebar ul li {
-            margin-bottom: 15px;
+        .sidebar-menu {
+            padding: 1rem 0;
         }
 
-        .sidebar ul li a {
-            color: white;
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1.5rem;
+            color: rgba(255, 255, 255, 0.9);
             text-decoration: none;
-            display: block;
-            padding: 10px 15px;
-            border-radius: 5px;
-            transition: background-color 0.3s ease;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
         }
 
-        .sidebar ul li a:hover,
-        .sidebar ul li a.active {
-            background-color: var(--secondary-color);
+        .sidebar-menu a:hover,
+        .sidebar-menu a.active {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-left-color: #60a5fa;
+        }
+
+        .sidebar-menu a i {
+            width: 20px;
+            margin-right: 0.75rem;
         }
 
         .main-content {
-            flex-grow: 1;
-            padding: 30px;
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+            padding: 2rem;
         }
 
-        .header {
-            background-color: var(--card-background);
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .header-section {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
         }
 
-        .header h1 {
-            margin: 0;
-            color: var(--primary-color);
-        }
-
-        .header .user-info {
-            font-weight: bold;
-        }
-
-        .dashboard-cards {
+        .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 25px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
         }
 
-        .card-item {
-            background-color: var(--card-background);
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
-            text-align: center;
-            transition: transform 0.3s ease;
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s ease;
         }
 
-        .card-item:hover {
-            transform: translateY(-5px);
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
 
-        .card-item .icon {
-            font-size: 40px;
-            color: var(--primary-color);
-            margin-bottom: 10px;
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
         }
 
-        .card-item h3 {
-            font-size: 28px;
-            margin: 5px 0;
-            color: var(--primary-color);
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--dark-color);
+            margin-bottom: 0.25rem;
         }
 
-        .card-item p {
-            font-size: 16px;
-            color: #666;
+        .stat-label {
+            color: var(--secondary-color);
+            font-size: 0.875rem;
+            font-weight: 500;
         }
 
-        .recent-activity {
-            background-color: var(--card-background);
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
+        .table-container {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
         }
 
-        .recent-activity h2 {
-            color: var(--primary-color);
-            margin-bottom: 20px;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 10px;
+        .table-header {
+            background: #f8fafc;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e2e8f0;
         }
 
-        .recent-activity ul {
-            list-style: none;
-            padding: 0;
+        .badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
         }
 
-        .recent-activity ul li {
-            padding: 10px 0;
-            border-bottom: 1px dashed var(--border-color);
-            color: #555;
-        }
-
-        .recent-activity ul li:last-child {
-            border-bottom: none;
-        }
-
-        .btn-outline {
-            background-color: transparent;
-            border: 1px solid var(--primary-color);
-            color: var(--primary-color);
-            padding: 8px 15px;
-            border-radius: 5px;
-            text-decoration: none;
-            transition: all 0.3s ease;
-        }
-
-        .btn-outline:hover {
-            background-color: var(--primary-color);
+        .btn-logout {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             color: white;
         }
 
-        .form-container {
-            background-color: var(--card-background);
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px var(--shadow-color);
-            margin-top: 30px;
-        }
-
-        .form-container h2 {
-            color: var(--primary-color);
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .form-control { /* Estilo base para inputs y selects */
-            border-radius: 5px;
-            border: 1px solid var(--border-color);
-            padding: 10px;
-            margin-bottom: 15px; /* Se ajusta con mb-3 de Bootstrap */
-            width: 100%;
-        }
-
-        .form-label { /* Estilo para etiquetas */
-            font-weight: bold;
-            margin-bottom: 5px;
-            display: block;
-        }
-
-        .form-select { /* Estilo específico para selects */
-            border-radius: 5px;
-            border: 1px solid var(--border-color);
-            padding: 10px;
-            width: 100%;
-            background-color: white; /* Para asegurar fondo blanco */
-        }
-
-
-        .btn-success {
-            background-color: #28a745;
-            border-color: #28a745;
+        .btn-logout:hover {
+            background: rgba(255, 255, 255, 0.2);
             color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
         }
 
-        .btn-success:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.show {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 1rem;
+            }
         }
-
-        .alert {
-            padding: 15px;
-            margin-bottom: 20px;
-            border: 1px solid transparent;
-            border-radius: 4px;
-        }
-
-        .alert-success {
-            color: #155724;
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-        }
-
-        .alert-danger {
-            color: #721c24;
-            background-color: #f8d7da;
-            border-color: #f5c6cb;
-        }
-
     </style>
 </head>
 <body>
-    <div class="wrapper">
-        <div class="sidebar">
-            <h2>Gestión Social</h2>
-            <ul>
-                <li><a href="dashboard.php" class="<?php echo (!isset($_GET['section']) || $_GET['section'] === '') ? 'active' : ''; ?>"><i class="fas fa-home"></i> Inicio</a></li>
-                <li><a href="personas.php"><i class="fas fa-users"></i> Personas</a></li>
-                <li><a href="familias.php"><i class="fas fa-people-arrows"></i> Familias</a></li>
-                <li><a href="ayudas.php"><i class="fas fa-hands-helping"></i> Ayudas</a></li>
-                <li><a href="asignaciones.php"><i class="fas fa-file-invoice"></i> Asignaciones</a></li>
-                <?php if ($user_role === 'admin'): // Muestra "Configuración" solo si el rol es 'admin' ?>
-                    <li><a href="dashboard.php?section=usuarios" class="<?php echo (isset($_GET['section']) && $_GET['section'] === 'usuarios') ? 'active' : ''; ?>"><i class="fas fa-cogs"></i> Configuración</a></li>
-                <?php endif; ?>
-            </ul>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h4><i class="fas fa-heart me-2"></i>Desarrollo Social</h4>
+            <small class="text-light opacity-75">Sistema de Gestión</small>
         </div>
+        
+        <nav class="sidebar-menu">
+            <a href="dashboard.php" class="active">
+                <i class="fas fa-home"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="familias.php">
+                <i class="fas fa-users"></i>
+                <span>Familias</span>
+            </a>
+            <a href="asignaciones.php">
+                <i class="fas fa-hand-holding-heart"></i>
+                <span>Asignaciones</span>
+            </a>
+            <a href="ayudas.php">
+                <i class="fas fa-gift"></i>
+                <span>Tipos de Ayuda</span>
+            </a>
+            <?php if ($user_role === 'admin'): ?>
+            <a href="#" data-bs-toggle="modal" data-bs-target="#usuariosModal">
+                <i class="fas fa-user-cog"></i>
+                <span>Usuarios</span>
+            </a>
+            <?php endif; ?>
+        </nav>
+        
+        <a href="logout.php" class="btn btn-logout">
+            <i class="fas fa-sign-out-alt me-2"></i>
+            Cerrar Sesión
+        </a>
+    </div>
 
-        <div class="main-content">
-            <div class="header">
-                <h1>Bienvenido, <?php echo htmlspecialchars($_SESSION['username'] ?? 'Usuario'); ?>!</h1>
-                <div class="user-info">
-                    Rol: <span style="text-transform: capitalize;"><?php echo htmlspecialchars($user_role); ?></span>
+    <div class="main-content">
+        <div class="header-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="mb-1">Bienvenido, <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['nombre'] ?? 'Usuario'); ?>!</h1>
+                    <p class="text-muted mb-0">Panel de control del Sistema de Desarrollo Social</p>
+                </div>
+                <div class="text-end">
+                    <small class="text-muted">Rol: <strong><?php echo ucfirst($user_role); ?></strong></small><br>
+                    <small class="text-muted"><?php echo date('d/m/Y H:i'); ?></small>
                 </div>
             </div>
+        </div>
 
-            <?php if ($mensaje): ?>
-                <div class="alert alert-success" role="alert">
-                    <?php echo htmlspecialchars($mensaje); ?>
+        <?php if ($mensaje): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle me-2"></i>
+            <?php echo htmlspecialchars($mensaje); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($error): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <?php echo htmlspecialchars($error); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
+
+        <!-- Estadísticas -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon" style="background-color: var(--primary-color); color: white;">
+                    <i class="fas fa-users"></i>
                 </div>
-            <?php endif; ?>
-
-            <?php if ($error): ?>
-                <div class="alert alert-danger" role="alert">
-                    <?php echo htmlspecialchars($error); ?>
+                <div class="stat-value"><?php echo number_format($stats['familias_activas']); ?></div>
+                <div class="stat-label">Familias Activas</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon" style="background-color: var(--success-color); color: white;">
+                    <i class="fas fa-hand-holding-heart"></i>
                 </div>
-            <?php endif; ?>
-
-            <?php if (!$mostrar_formulario_usuarios): // Mostrar el dashboard principal si no se está en la sección de usuarios ?>
-                <div class="dashboard-cards">
-                    <div class="card-item">
-                        <div class="icon"><i class="fas fa-users"></i></div>
-                        <h3><?php echo $personas_count; ?></h3>
-                        <p>Personas Registradas</p>
-                    </div>
-                    <div class="card-item">
-                        <div class="icon"><i class="fas fa-people-arrows"></i></div>
-                        <h3><?php echo $familias_count; ?></h3>
-                        <p>Familias Registradas</p>
-                    </div>
-                    <div class="card-item">
-                        <div class="icon"><i class="fas fa-hands-helping"></i></div>
-                        <h3><?php echo $ayudas_count; ?></h3>
-                        <p>Tipos de Ayuda</p>
-                    </div>
-                    <div class="card-item">
-                        <div class="icon"><i class="fas fa-file-invoice"></i></div>
-                        <h3><?php echo $asignaciones_count; ?></h3>
-                        <p>Ayudas Asignadas</p>
-                    </div>
+                <div class="stat-value"><?php echo number_format($stats['asignaciones_mes']); ?></div>
+                <div class="stat-label">Asignaciones este Mes</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon" style="background-color: var(--warning-color); color: white;">
+                    <i class="fas fa-clock"></i>
                 </div>
+                <div class="stat-value"><?php echo number_format($stats['asignaciones_pendientes']); ?></div>
+                <div class="stat-label">Pendientes de Autorización</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon" style="background-color: var(--info-color); color: white;">
+                    <i class="fas fa-gift"></i>
+                </div>
+                <div class="stat-value"><?php echo number_format($stats['tipos_ayuda']); ?></div>
+                <div class="stat-label">Tipos de Ayuda Disponibles</div>
+            </div>
+        </div>
 
-                <div class="recent-activity">
-                    <h2>Últimas Personas Registradas</h2>
-                    <?php if (!empty($recent_personas)): ?>
-                        <ul>
-                            <?php foreach ($recent_personas as $persona): ?>
-                                <li>
-                                    <strong><?php echo htmlspecialchars($persona['nombre'] . ' ' . $persona['apellido']); ?></strong> (cédula: <?php echo htmlspecialchars($persona['cedula']); ?>)
-                                    - Registrado el: <?php echo htmlspecialchars(date('d/m/Y H:i', strtotime($persona['fecha_registro']))); ?>
-                                </li>
+        <!-- Últimas asignaciones -->
+        <div class="table-container">
+            <div class="table-header">
+                <h5 class="mb-0"><i class="fas fa-history me-2"></i>Últimas Asignaciones</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Expediente</th>
+                            <th>Beneficiario</th>
+                            <th>Ayuda</th>
+                            <th>Estado</th>
+                            <th>Prioridad</th>
+                            <th>Fecha</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($ultimas_asignaciones)): ?>
+                            <?php foreach ($ultimas_asignaciones as $asignacion): ?>
+                            <tr>
+                                <td>
+                                    <small class="text-muted"><?php echo htmlspecialchars($asignacion['numero_expediente'] ?? 'N/A'); ?></small>
+                                </td>
+                                <td>
+                                    <strong><?php echo htmlspecialchars($asignacion['beneficiario']); ?></strong>
+                                    <?php if (!empty($asignacion['apellido_beneficiario'])): ?>
+                                    <br><small class="text-muted"><?php echo htmlspecialchars($asignacion['apellido_beneficiario']); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo htmlspecialchars($asignacion['nombre_ayuda']); ?></td>
+                                <td>
+                                    <span class="badge bg-<?php echo obtenerColorEstado($asignacion['estado']); ?>">
+                                        <?php echo ucfirst($asignacion['estado']); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-<?php echo obtenerColorPrioridad($asignacion['prioridad']); ?>">
+                                        <?php echo ucfirst($asignacion['prioridad']); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <small><?php echo formatearFecha($asignacion['fecha_asignacion']); ?></small>
+                                </td>
+                            </tr>
                             <?php endforeach; ?>
-                        </ul>
-                    <?php else: ?>
-                        <p>No hay personas registradas recientemente.</p>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($mostrar_formulario_usuarios && $user_role === 'admin'): // Mostrar el formulario de registro de usuarios solo si se ha hecho clic en "Configuración" y es 'admin' ?>
-                <div class="form-container">
-                    <h2 class="mb-4 text-center">Registrar Nuevo Usuario</h2>
-                    <form action="dashboard.php?section=usuarios" method="POST">
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="nombre_usuario" class="form-label">Nombre:</label>
-                                    <input type="text" class="form-control" id="nombre_usuario" name="nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="apellido_usuario" class="form-label">Apellido:</label>
-                                    <input type="text" class="form-control" id="apellido_usuario" name="apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-group">
-                                <label for="email" class="form-label">Email:</label>
-                                <input type="email" class="form-control" id="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-group">
-                                <label for="usuario" class="form-label">Usuario:</label>
-                                <input type="text" class="form-control" id="usuario" name="usuario" required value="<?php echo htmlspecialchars($_POST['usuario'] ?? ''); ?>">
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-group">
-                                <label for="contraseña" class="form-label">Contraseña:</label>
-                                <input type="password" class="form-control" id="contraseña" name="contraseña" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-group">
-                                <label for="tipo_usuario" class="form-label">Tipo de Usuario:</label>
-                                <select class="form-select" id="tipo_usuario" name="tipo_usuario" required>
-                                    <option value="empleado" <?php echo (isset($_POST['tipo_usuario']) && $_POST['tipo_usuario'] == 'empleado') ? 'selected' : ''; ?>>Empleado</option>
-                                    <option value="admin" <?php echo (isset($_POST['tipo_usuario']) && $_POST['tipo_usuario'] == 'admin') ? 'selected' : ''; ?>>Admin</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="text-center">
-                            <button type="submit" name="agregar_usuario" class="btn btn-success">Registrar Usuario</button>
-                        </div>
-                    </form>
-                </div>
-            <?php endif; ?>
-
-            <div class="text-center" style="margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-                <a href="logout.php" class="btn btn-outline">Cerrar Sesión</a>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">
+                                    <i class="fas fa-inbox fa-2x mb-2 d-block opacity-25"></i>
+                                    No hay asignaciones registradas
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    <script>
-        // Función para capitalizar la primera letra de cada palabra
-        function capitalizarInput(inputElementId) {
-            const input = document.getElementById(inputElementId);
-            if (input) {
-                input.addEventListener('input', function() {
-                    const words = this.value.split(' ');
-                    const capitalizedWords = words.map(word => {
-                        if (word.length > 0) {
-                            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-                        }
-                        return word;
-                    });
-                    this.value = capitalizedWords.join(' ');
-                });
-            }
-        }
+    <!-- Modal para gestión de usuarios (solo admin) -->
+    <?php if ($user_role === 'admin'): ?>
+    <div class="modal fade" id="usuariosModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Gestión de Usuarios</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form method="POST" action="dashboard.php">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="nombre" class="form-label">Nombre</label>
+                                    <input type="text" class="form-control" id="nombre" name="nombre" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="apellido" class="form-label">Apellido</label>
+                                    <input type="text" class="form-control" id="apellido" name="apellido" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">Email</label>
+                                    <input type="email" class="form-control" id="email" name="email">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="usuario" class="form-label">Usuario</label>
+                                    <input type="text" class="form-control" id="usuario" name="usuario" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="contraseña" class="form-label">Contraseña</label>
+                                    <input type="password" class="form-control" id="contraseña" name="contraseña" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="rol" class="form-label">Rol</label>
+                                    <select class="form-select" id="rol" name="rol" required>
+                                        <option value="empleado">Empleado</option>
+                                        <option value="admin">Administrador</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-end gap-2">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" name="agregar_usuario" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>Crear Usuario
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
-        // Aplicar capitalización a los campos de nombre y apellido del formulario de USUARIO
-        capitalizarInput('nombre_usuario');
-        capitalizarInput('apellido_usuario');
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
