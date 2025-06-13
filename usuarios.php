@@ -842,4 +842,571 @@ try {
         <?php endif; ?>
 
         <?php if ($error): ?>
-        <div class="alert alert-
+        <div class="alert alert-danger alert-dismissible fade show fade-in-up" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <?php echo htmlspecialchars($error); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
+
+        <!-- Statistics Row -->
+        <div class="stats-row fade-in-up">
+            <div class="stat-card">
+                <div class="stat-card-content">
+                    <div class="stat-card-info">
+                        <h3><?php echo number_format($stats['total']); ?></h3>
+                        <p>Total Usuarios</p>
+                    </div>
+                    <div class="stat-card-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-content">
+                    <div class="stat-card-info">
+                        <h3><?php echo number_format($stats['activos']); ?></h3>
+                        <p>Usuarios Activos</p>
+                    </div>
+                    <div class="stat-card-icon" style="background: linear-gradient(135deg, var(--success-color), #047857);">
+                        <i class="fas fa-user-check"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-content">
+                    <div class="stat-card-info">
+                        <h3><?php echo number_format($stats['administradores']); ?></h3>
+                        <p>Administradores</p>
+                    </div>
+                    <div class="stat-card-icon" style="background: linear-gradient(135deg, var(--danger-color), #b91c1c);">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-content">
+                    <div class="stat-card-info">
+                        <h3><?php echo number_format($stats['empleados']); ?></h3>
+                        <p>Empleados</p>
+                    </div>
+                    <div class="stat-card-icon" style="background: linear-gradient(135deg, var(--info-color), #0e7490);">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
+        <div class="filters-section fade-in-up">
+            <form method="GET" class="row g-3">
+                <div class="col-md-4">
+                    <div class="search-box">
+                        <input type="text" 
+                               class="form-control" 
+                               name="search" 
+                               placeholder="Buscar por nombre, apellido, email o usuario..." 
+                               value="<?php echo htmlspecialchars($search); ?>">
+                        <i class="fas fa-search search-icon"></i>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select" name="rol">
+                        <option value="">Todos los roles</option>
+                        <option value="admin" <?php echo $rol_filter === 'admin' ? 'selected' : ''; ?>>Administrador</option>
+                        <option value="supervisor" <?php echo $rol_filter === 'supervisor' ? 'selected' : ''; ?>>Supervisor</option>
+                        <option value="empleado" <?php echo $rol_filter === 'empleado' ? 'selected' : ''; ?>>Empleado</option>
+                        <option value="consulta" <?php echo $rol_filter === 'consulta' ? 'selected' : ''; ?>>Consulta</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select" name="estado">
+                        <option value="todos" <?php echo $estado_filter === 'todos' ? 'selected' : ''; ?>>Todos</option>
+                        <option value="activos" <?php echo $estado_filter === 'activos' ? 'selected' : ''; ?>>Activos</option>
+                        <option value="inactivos" <?php echo $estado_filter === 'inactivos' ? 'selected' : ''; ?>>Inactivos</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-fill">
+                            <i class="fas fa-search me-2"></i>Buscar
+                        </button>
+                        <a href="usuarios.php" class="btn btn-outline-secondary">
+                            <i class="fas fa-refresh"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-outline-success w-100" onclick="exportarUsuarios()">
+                        <i class="fas fa-download me-2"></i>Exportar
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Usuarios Grid -->
+        <?php if (!empty($usuarios)): ?>
+        <div class="usuarios-grid">
+            <?php foreach ($usuarios as $usuario): ?>
+            <div class="usuario-card <?php echo $usuario['activo'] ? '' : 'inactive'; ?> fade-in-up">
+                <div class="usuario-card-header">
+                    <div class="usuario-status">
+                        <span class="status-badge <?php echo $usuario['activo'] ? 'status-active' : 'status-inactive'; ?>">
+                            <?php echo $usuario['activo'] ? 'Activo' : 'Inactivo'; ?>
+                        </span>
+                    </div>
+                    <div class="usuario-avatar" style="background: <?php 
+                        echo match($usuario['rol']) {
+                            'admin' => 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                            'supervisor' => 'linear-gradient(135deg, #d97706, #c2410c)',
+                            'empleado' => 'linear-gradient(135deg, #059669, #047857)',
+                            'consulta' => 'linear-gradient(135deg, #64748b, #475569)',
+                            default => 'linear-gradient(135deg, var(--primary-color), var(--primary-dark))'
+                        };
+                    ?>;">
+                        <?php echo strtoupper(substr($usuario['nombre'], 0, 1) . substr($usuario['apellido'], 0, 1)); ?>
+                    </div>
+                    <div class="usuario-name">
+                        <?php echo htmlspecialchars($usuario['nombre'] . ' ' . $usuario['apellido']); ?>
+                    </div>
+                    <div class="usuario-username">
+                        @<?php echo htmlspecialchars($usuario['usuario']); ?>
+                    </div>
+                </div>
+
+                <div class="usuario-card-body">
+                    <?php if (!empty($usuario['email'])): ?>
+                    <div class="usuario-info-item">
+                        <i class="fas fa-envelope"></i>
+                        <span><?php echo htmlspecialchars($usuario['email']); ?></span>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <div class="usuario-info-item">
+                        <i class="fas fa-user-tag"></i>
+                        <span class="role-badge role-<?php echo $usuario['rol']; ?>">
+                            <?php echo ucfirst($usuario['rol']); ?>
+                        </span>
+                    </div>
+                    
+                    <div class="usuario-info-item">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span>Registrado: <?php echo formatearFecha($usuario['fecha_registro']); ?></span>
+                    </div>
+
+                    <?php if ($usuario['ultimo_acceso']): ?>
+                    <div class="usuario-info-item">
+                        <i class="fas fa-clock"></i>
+                        <span>Último acceso: <?php echo formatearFechaHora($usuario['ultimo_acceso']); ?></span>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if ($usuario['ultima_actividad']): ?>
+                    <div class="usuario-info-item">
+                        <i class="fas fa-bolt"></i>
+                        <span>Última actividad: <?php echo formatearFecha($usuario['ultima_actividad']); ?></span>
+                    </div>
+                    <?php endif; ?>
+
+                    <div class="usuario-stats">
+                        <div class="usuario-stat">
+                            <span class="usuario-stat-number"><?php echo $usuario['asignaciones_creadas']; ?></span>
+                            <span class="usuario-stat-label">Creadas</span>
+                        </div>
+                        <div class="usuario-stat">
+                            <span class="usuario-stat-number"><?php echo $usuario['asignaciones_autorizadas']; ?></span>
+                            <span class="usuario-stat-label">Autorizadas</span>
+                        </div>
+                        <div class="usuario-stat">
+                            <span class="usuario-stat-number"><?php echo $usuario['asignaciones_entregadas']; ?></span>
+                            <span class="usuario-stat-label">Entregadas</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="usuario-card-actions">
+                    <button class="btn-action btn-edit" 
+                            onclick="editarUsuario(<?php echo $usuario['id']; ?>)"
+                            title="Editar usuario">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    
+                    <?php if ($usuario['id'] != $_SESSION['user_id']): ?>
+                    <button class="btn-action btn-toggle" 
+                            onclick="cambiarEstadoUsuario(<?php echo $usuario['id']; ?>, <?php echo $usuario['activo'] ? '0' : '1'; ?>)"
+                            title="<?php echo $usuario['activo'] ? 'Desactivar' : 'Activar'; ?> usuario">
+                        <i class="fas fa-<?php echo $usuario['activo'] ? 'pause' : 'play'; ?>"></i>
+                    </button>
+                    
+                    <button class="btn-action btn-reset" 
+                            onclick="resetearPassword(<?php echo $usuario['id']; ?>, '<?php echo htmlspecialchars($usuario['nombre'] . ' ' . $usuario['apellido']); ?>')"
+                            title="Resetear contraseña">
+                        <i class="fas fa-key"></i>
+                    </button>
+                    
+                    <button class="btn-action btn-delete" 
+                            onclick="eliminarUsuario(<?php echo $usuario['id']; ?>, '<?php echo htmlspecialchars($usuario['nombre'] . ' ' . $usuario['apellido']); ?>')"
+                            title="Eliminar usuario">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php else: ?>
+        <div class="empty-state fade-in-up">
+            <i class="fas fa-users-cog"></i>
+            <h3>No se encontraron usuarios</h3>
+            <p>No hay usuarios registrados que coincidan con los criterios de búsqueda</p>
+            <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#usuarioModal">
+                <i class="fas fa-plus me-2"></i>Crear Primer Usuario
+            </button>
+        </div>
+        <?php endif; ?>
+
+        <!-- Pagination -->
+        <?php if ($total_pages > 1): ?>
+        <div class="pagination-container fade-in-up">
+            <div class="d-flex justify-content-between align-items-center w-100">
+                <div class="text-muted">
+                    Mostrando <?php echo min($offset + 1, $total_records); ?> - <?php echo min($offset + $limit, $total_records); ?> 
+                    de <?php echo number_format($total_records); ?> usuarios
+                </div>
+                
+                <nav>
+                    <ul class="pagination">
+                        <?php if ($page > 1): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&rol=<?php echo $rol_filter; ?>&estado=<?php echo $estado_filter; ?>">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
+                            <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
+                                <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&rol=<?php echo $rol_filter; ?>&estado=<?php echo $estado_filter; ?>">
+                                    <?php echo $i; ?>
+                                </a>
+                            </li>
+                        <?php endfor; ?>
+                        
+                        <?php if ($page < $total_pages): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&rol=<?php echo $rol_filter; ?>&estado=<?php echo $estado_filter; ?>">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        <?php endif; ?>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Floating Action Button -->
+    <button class="fab" data-bs-toggle="modal" data-bs-target="#usuarioModal" title="Agregar nuevo usuario">
+        <i class="fas fa-plus"></i>
+    </button>
+
+    <!-- Modal para agregar/editar usuario -->
+    <div class="modal fade" id="usuarioModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-user-plus me-2"></i>
+                        <span id="modalTitle">Nuevo Usuario</span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="usuarioForm" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="accion" id="accion" value="agregar">
+                        <input type="hidden" name="usuario_id" id="usuario_id">
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="nombre" class="form-label">Nombre *</label>
+                                    <input type="text" class="form-control" id="nombre" name="nombre" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="apellido" class="form-label">Apellido *</label>
+                                    <input type="text" class="form-control" id="apellido" name="apellido" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="usuario" class="form-label">Usuario *</label>
+                                    <input type="text" class="form-control" id="usuario" name="usuario" required>
+                                    <div class="form-text">Nombre de usuario único para iniciar sesión</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">Email</label>
+                                    <input type="email" class="form-control" id="email" name="email">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="contraseña" class="form-label">Contraseña <span id="contraseñaRequerida">*</span></label>
+                                    <input type="password" class="form-control" id="contraseña" name="contraseña">
+                                    <div class="form-text">Mínimo 6 caracteres</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="rol" class="form-label">Rol *</label>
+                                    <select class="form-select" id="rol" name="rol" required>
+                                        <option value="empleado">Empleado</option>
+                                        <option value="supervisor">Supervisor</option>
+                                        <option value="admin">Administrador</option>
+                                        <option value="consulta">Solo Consulta</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Roles del sistema:</strong>
+                            <ul class="mb-0 mt-2">
+                                <li><strong>Administrador:</strong> Acceso completo al sistema</li>
+                                <li><strong>Supervisor:</strong> Puede autorizar asignaciones</li>
+                                <li><strong>Empleado:</strong> Puede crear y gestionar asignaciones</li>
+                                <li><strong>Solo Consulta:</strong> Solo puede ver información</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="fas fa-times me-2"></i>Cancelar
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            <span id="btnSubmitText">Crear Usuario</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para cambiar estado -->
+    <div class="modal fade" id="estadoModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Cambiar Estado</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="estadoMensaje"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form method="POST" style="display: inline;">
+                        <input type="hidden" name="accion" value="cambiar_estado">
+                        <input type="hidden" name="usuario_id" id="estadoUsuarioId">
+                        <input type="hidden" name="nuevo_estado" id="nuevoEstado">
+                        <button type="submit" class="btn btn-warning" id="btnCambiarEstado">
+                            <i class="fas fa-exchange-alt me-2"></i>Confirmar
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para resetear contraseña -->
+    <div class="modal fade" id="resetModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="fas fa-key me-2"></i>Resetear Contraseña</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>¿Está seguro que desea resetear la contraseña de <strong id="usuarioReset"></strong>?</p>
+                    <p class="text-muted small">Se establecerá la contraseña temporal: <code>password123</code></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form method="POST" style="display: inline;">
+                        <input type="hidden" name="accion" value="resetear_password">
+                        <input type="hidden" name="usuario_id" id="resetUsuarioId">
+                        <button type="submit" class="btn btn-info">
+                            <i class="fas fa-key me-2"></i>Resetear Contraseña
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para eliminar -->
+    <div class="modal fade" id="eliminarModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Eliminación</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>¿Está seguro que desea eliminar al usuario <strong id="usuarioEliminar"></strong>?</p>
+                    <p class="text-muted small">Si el usuario tiene asignaciones asociadas será desactivado en lugar de eliminado.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form method="POST" style="display: inline;">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="usuario_id" id="eliminarUsuarioId">
+                        <button type="submit" class="btn btn-danger">
+                            <i class="fas fa-trash me-2"></i>Eliminar Usuario
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let usuarioIdActual = null;
+
+        // Auto-capitalizar nombres
+        document.addEventListener('DOMContentLoaded', function() {
+            const campos = ['nombre', 'apellido'];
+            campos.forEach(campo => {
+                const input = document.getElementById(campo);
+                if (input) {
+                    input.addEventListener('input', function() {
+                        this.value = this.value.replace(/\b\w/g, l => l.toUpperCase());
+                    });
+                }
+            });
+        });
+
+        function editarUsuario(id) {
+            usuarioIdActual = id;
+            
+            // Obtener datos del usuario desde la vista actual
+            const usuarioCard = document.querySelector(`[onclick*="${id}"]`).closest('.usuario-card');
+            const nombre = usuarioCard.querySelector('.usuario-name').textContent.split(' ')[0];
+            const apellido = usuarioCard.querySelector('.usuario-name').textContent.split(' ').slice(1).join(' ');
+            const usuario = usuarioCard.querySelector('.usuario-username').textContent.replace('@', '');
+            const rol = usuarioCard.querySelector('.role-badge').textContent.toLowerCase();
+            
+            document.getElementById('modalTitle').textContent = 'Editar Usuario';
+            document.getElementById('btnSubmitText').textContent = 'Actualizar Usuario';
+            document.getElementById('accion').value = 'editar';
+            document.getElementById('usuario_id').value = id;
+            document.getElementById('contraseñaRequerida').style.display = 'none';
+            document.getElementById('contraseña').removeAttribute('required');
+            
+            document.getElementById('nombre').value = nombre;
+            document.getElementById('apellido').value = apellido;
+            document.getElementById('usuario').value = usuario;
+            document.getElementById('rol').value = rol;
+            
+            new bootstrap.Modal(document.getElementById('usuarioModal')).show();
+        }
+
+        function cambiarEstadoUsuario(id, nuevoEstado) {
+            const accion = nuevoEstado === 1 ? 'activar' : 'desactivar';
+            const mensaje = `¿Está seguro que desea ${accion} este usuario?`;
+            
+            document.getElementById('estadoMensaje').textContent = mensaje;
+            document.getElementById('estadoUsuarioId').value = id;
+            document.getElementById('nuevoEstado').value = nuevoEstado;
+            document.getElementById('btnCambiarEstado').innerHTML = `<i class="fas fa-exchange-alt me-2"></i>${accion.charAt(0).toUpperCase() + accion.slice(1)}`;
+            
+            new bootstrap.Modal(document.getElementById('estadoModal')).show();
+        }
+
+        function resetearPassword(id, nombre) {
+            document.getElementById('usuarioReset').textContent = nombre;
+            document.getElementById('resetUsuarioId').value = id;
+            new bootstrap.Modal(document.getElementById('resetModal')).show();
+        }
+
+        function eliminarUsuario(id, nombre) {
+            document.getElementById('usuarioEliminar').textContent = nombre;
+            document.getElementById('eliminarUsuarioId').value = id;
+            new bootstrap.Modal(document.getElementById('eliminarModal')).show();
+        }
+
+        function exportarUsuarios() {
+            const params = new URLSearchParams(window.location.search);
+            params.set('export', 'excel');
+            window.open(`api/export_usuarios.php?${params.toString()}`, '_blank');
+        }
+
+        // Limpiar formulario al cerrar modal
+        document.getElementById('usuarioModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('usuarioForm').reset();
+            document.getElementById('modalTitle').textContent = 'Nuevo Usuario';
+            document.getElementById('btnSubmitText').textContent = 'Crear Usuario';
+            document.getElementById('accion').value = 'agregar';
+            document.getElementById('usuario_id').value = '';
+            document.getElementById('contraseñaRequerida').style.display = 'inline';
+            document.getElementById('contraseña').setAttribute('required', 'required');
+            usuarioIdActual = null;
+        });
+
+        // Búsqueda en tiempo real
+        let searchTimeout;
+        document.querySelector('input[name="search"]').addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                this.form.submit();
+            }, 500);
+        });
+
+        // Animaciones de contadores
+        document.addEventListener('DOMContentLoaded', function() {
+            const counters = document.querySelectorAll('.stat-card-info h3, .usuario-stat-number');
+            counters.forEach(counter => {
+                const target = parseInt(counter.textContent.replace(/,/g, ''));
+                let current = 0;
+                const increment = target / 50;
+                const timer = setInterval(function() {
+                    current += increment;
+                    if (current >= target) {
+                        current = target;
+                        clearInterval(timer);
+                    }
+                    counter.textContent = Math.floor(current).toLocaleString();
+                }, 30);
+            });
+        });
+
+        // Generar usuario automáticamente basado en nombre y apellido
+        document.getElementById('nombre').addEventListener('input', generarUsuario);
+        document.getElementById('apellido').addEventListener('input', generarUsuario);
+
+        function generarUsuario() {
+            const nombre = document.getElementById('nombre').value.toLowerCase();
+            const apellido = document.getElementById('apellido').value.toLowerCase();
+            const usuarioInput = document.getElementById('usuario');
+            
+            if (nombre && apellido && !usuarioIdActual) {
+                const sugerencia = nombre.charAt(0) + apellido.replace(/\s+/g, '');
+                usuarioInput.value = sugerencia;
+            }
+        }
+    </script>
+</body>
+</html>

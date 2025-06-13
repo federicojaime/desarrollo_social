@@ -5,10 +5,10 @@
  */
 
 // Configuración de la base de datos
-$host = "localhost";
-$dbname = "desarrollo_social";
-$username = "root";
-$password = "";
+$host = "srv1597.hstgr.io";
+$dbname = "u565673608_desarrollo_soc";
+$username = "u565673608_desarrollo_soc";
+$password = "xU]xX1z;";
 
 try {
     // Conexión PDO con opciones mejoradas
