@@ -1,9 +1,79 @@
+<?php
+// Headers para evitar cache
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Cache-Control: post-check=0, pre-check=0", false);
+header("Pragma: no-cache");
+
+session_start();
+require 'includes/conexion.php';
+
+$error = '';
+$mensaje = '';
+
+// Si ya está logueado, redirigir al dashboard
+if (isset($_SESSION['user_id'])) {
+    header("Location: dashboard.php");
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+    $usuario = trim($_POST['usuario']);
+    $contraseña = $_POST['contraseña'];
+    
+    if (empty($usuario) || empty($contraseña)) {
+        $error = "Por favor ingrese usuario y contraseña.";
+    } else {
+        try {
+            // Buscar usuario en la base de datos
+            $stmt = $pdo->prepare("SELECT * FROM usuarios WHERE usuario = ? AND activo = 1");
+            $stmt->execute([$usuario]);
+            $user = $stmt->fetch();
+            
+            if ($user && password_verify($contraseña, $user['contraseña'])) {
+                // Login exitoso
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['usuario'] = $user['usuario'];
+                $_SESSION['username'] = $user['usuario'];
+                $_SESSION['nombre'] = $user['nombre'];
+                $_SESSION['apellido'] = $user['apellido'];
+                $_SESSION['rol'] = $user['rol'];
+                
+                // Actualizar último acceso
+                $stmt_update = $pdo->prepare("UPDATE usuarios SET ultimo_acceso = NOW(), intentos_fallidos = 0 WHERE id = ?");
+                $stmt_update->execute([$user['id']]);
+                
+                // Registrar login en el log si la función existe
+                if (function_exists('registrarLog')) {
+                    registrarLog($pdo, 'usuarios', $user['id'], 'login', 'Inicio de sesión exitoso', $user['id']);
+                }
+                
+                header("Location: dashboard.php");
+                exit;
+            } else {
+                // Login fallido
+                if ($user) {
+                    // Incrementar intentos fallidos
+                    $stmt_fail = $pdo->prepare("UPDATE usuarios SET intentos_fallidos = intentos_fallidos + 1 WHERE id = ?");
+                    $stmt_fail->execute([$user['id']]);
+                }
+                $error = "Usuario o contraseña incorrectos.";
+            }
+        } catch (PDOException $e) {
+            $error = "Error de conexión. Intente nuevamente.";
+            error_log("Error de login: " . $e->getMessage());
+        }
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Acceso al Sistema - Desarrollo Social</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
@@ -67,7 +137,6 @@
             0% {
                 transform: translate(0, 0);
             }
-
             100% {
                 transform: translate(50px, 50px);
             }
@@ -91,7 +160,6 @@
                 opacity: 0;
                 transform: translateY(40px) scale(0.95);
             }
-
             to {
                 opacity: 1;
                 transform: translateY(0) scale(1);
@@ -126,8 +194,8 @@
         }
 
         .logo img {
-            width: 280px;
-            height: 280px;
+            width: 190px;
+            height: 190px;
             object-fit: contain;
             display: block;
         }
@@ -172,7 +240,6 @@
                 opacity: 0;
                 transform: translateY(-10px);
             }
-
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -247,7 +314,7 @@
             z-index: 2;
         }
 
-        .form-input:focus+.input-icon {
+        .form-input:focus + .input-icon {
             color: var(--primary);
         }
 
@@ -265,26 +332,6 @@
 
         .password-toggle:hover {
             color: var(--text-primary);
-        }
-
-        .form-options {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-            font-size: 0.875rem;
-        }
-
-        .checkbox-container {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .checkbox-container input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
-            accent-color: var(--primary);
         }
 
         .login-btn {
@@ -363,26 +410,6 @@
             margin: 0;
         }
 
-        .shake {
-            animation: shake 0.5s ease-in-out;
-        }
-
-        @keyframes shake {
-
-            0%,
-            100% {
-                transform: translateX(0);
-            }
-
-            25% {
-                transform: translateX(-5px);
-            }
-
-            75% {
-                transform: translateX(5px);
-            }
-        }
-
         /* Responsive */
         @media (max-width: 768px) {
             body {
@@ -390,26 +417,22 @@
                 height: 100vh;
                 overflow-y: auto;
             }
-
             .login-container {
                 max-width: 100%;
                 border-radius: 16px;
                 margin: auto;
             }
-
             .login-header,
             .login-form {
                 padding-left: 1.5rem;
                 padding-right: 1.5rem;
             }
-
             .system-title {
                 font-size: 1.5rem;
             }
         }
 
         @media (max-width: 480px) {
-
             .form-input,
             .login-btn {
                 height: 56px;
@@ -417,7 +440,6 @@
         }
     </style>
 </head>
-
 <body>
     <div class="login-container">
         <div class="login-header">
@@ -431,17 +453,21 @@
         </div>
 
         <div class="login-form">
-            <div class="alert alert-error" id="errorAlert" style="display: none;">
+            <?php if ($error): ?>
+            <div class="alert alert-error">
                 <i class="fas fa-exclamation-triangle"></i>
-                <span id="errorMessage"></span>
+                <span><?php echo htmlspecialchars($error); ?></span>
             </div>
+            <?php endif; ?>
 
-            <div class="alert alert-success" id="successAlert" style="display: none;">
+            <?php if ($mensaje): ?>
+            <div class="alert alert-success">
                 <i class="fas fa-check-circle"></i>
-                <span id="successMessage"></span>
+                <span><?php echo htmlspecialchars($mensaje); ?></span>
             </div>
+            <?php endif; ?>
 
-            <form method="POST" id="loginForm" novalidate>
+            <form method="POST" id="loginForm">
                 <div class="form-group">
                     <label class="form-label" for="usuario">Usuario</label>
                     <div class="input-group">
@@ -451,6 +477,7 @@
                             class="form-input"
                             placeholder="Ingrese su nombre de usuario"
                             autocomplete="username"
+                            value="<?php echo htmlspecialchars($_POST['usuario'] ?? ''); ?>"
                             required>
                         <i class="fas fa-user input-icon"></i>
                     </div>
@@ -467,23 +494,16 @@
                             autocomplete="current-password"
                             required>
                         <i class="fas fa-lock input-icon"></i>
-                        <i class="fas fa-eye password-toggle" id="togglePassword"></i>
+                        <i class="fas fa-eye password-toggle" onclick="togglePassword()"></i>
                     </div>
                 </div>
 
-                <div class="form-options">
-                    <div class="checkbox-container">
-                        <input type="checkbox" id="recordar" name="recordar">
-                        <label for="recordar">Recordarme</label>
-                    </div>
-                </div>
-
-                <button type="submit" name="login" class="login-btn" id="loginBtn">
-                    <span id="btnText">Iniciar Sesión</span>
+                <button type="submit" name="login" class="login-btn">
+                    Iniciar Sesión
                 </button>
             </form>
 
-            <div class="demo-credentials" id="demoCredentials">
+            <div class="demo-credentials">
                 <div class="demo-title">
                     <i class="fas fa-key"></i> Credenciales de Prueba
                 </div>
@@ -509,94 +529,27 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const loginForm = document.getElementById('loginForm');
-            const loginBtn = document.getElementById('loginBtn');
-            const btnText = document.getElementById('btnText');
-            const togglePassword = document.getElementById('togglePassword');
+        // Función simple para mostrar/ocultar contraseña
+        function togglePassword() {
             const passwordInput = document.getElementById('contraseña');
-            const usuarioInput = document.getElementById('usuario');
-
-            // Toggle mostrar/ocultar contraseña
-            togglePassword?.addEventListener('click', function() {
-                const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-                passwordInput.setAttribute('type', type);
-                this.classList.toggle('fa-eye');
-                this.classList.toggle('fa-eye-slash');
-            });
-
-            // Validación en tiempo real
-            function validateField(field) {
-                const value = field.value.trim();
-                if (value === '') {
-                    field.classList.add('error');
-                    field.classList.remove('success');
-                    return false;
-                } else {
-                    field.classList.remove('error');
-                    field.classList.add('success');
-                    return true;
-                }
+            const toggleIcon = document.querySelector('.password-toggle');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.classList.remove('fa-eye');
+                toggleIcon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.classList.remove('fa-eye-slash');
+                toggleIcon.classList.add('fa-eye');
             }
+        }
 
-            usuarioInput?.addEventListener('blur', function() {
-                validateField(this);
-            });
-            passwordInput?.addEventListener('blur', function() {
-                validateField(this);
-            });
-
-            // Limpiar estados de error al escribir
-            usuarioInput?.addEventListener('input', function() {
-                this.classList.remove('error');
-            });
-            passwordInput?.addEventListener('input', function() {
-                this.classList.remove('error');
-            });
-
-            // Manejo del formulario
-            loginForm?.addEventListener('submit', function(e) {
-                const usuario = usuarioInput.value.trim();
-                const contraseña = passwordInput.value;
-
-                if (!usuario || !contraseña) {
-                    e.preventDefault();
-                    if (!usuario) validateField(usuarioInput);
-                    if (!contraseña) validateField(passwordInput);
-
-                    loginForm.classList.add('shake');
-                    setTimeout(() => loginForm.classList.remove('shake'), 500);
-                    return false;
-                }
-
-                // Estado de carga
-                loginBtn.disabled = true;
-                btnText.textContent = 'Verificando credenciales...';
-
-                return true;
-            });
-
-            // Auto-focus
-            usuarioInput?.focus();
-        });
-
+        // Función para llenar credenciales
         function llenarCredenciales(usuario, password) {
             document.getElementById('usuario').value = usuario;
             document.getElementById('contraseña').value = password;
-            document.getElementById('usuario').classList.add('success');
-            document.getElementById('contraseña').classList.add('success');
-            document.getElementById('usuario').focus();
         }
-
-        // Prevenir envío múltiple
-        let formSubmitted = false;
-        document.getElementById('loginForm')?.addEventListener('submit', function() {
-            if (formSubmitted) {
-                return false;
-            }
-            formSubmitted = true;
-        });
     </script>
 </body>
-
 </html>

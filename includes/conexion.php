@@ -45,23 +45,60 @@ try {
                 apellido VARCHAR(100) NOT NULL DEFAULT '',
                 email VARCHAR(255) DEFAULT NULL,
                 contraseña VARCHAR(255) NOT NULL,
-                rol ENUM('admin', 'empleado', 'usuario') DEFAULT 'empleado',
+                rol ENUM('admin', 'supervisor', 'empleado', 'consulta') DEFAULT 'empleado',
                 activo TINYINT(1) DEFAULT 1,
                 intentos_fallidos INT DEFAULT 0,
                 ultimo_acceso TIMESTAMP NULL,
-                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
         
-        // Crear usuario admin por defecto
-        $admin_password = password_hash('admin123', PASSWORD_DEFAULT);
-        $pdo->exec("
-            INSERT INTO usuarios (usuario, nombre, apellido, contraseña, rol) 
-            VALUES ('admin', 'Administrador', 'Sistema', '$admin_password', 'admin')
-        ");
+        // Crear usuarios por defecto
+        $usuarios_default = [
+            ['admin', 'Administrador', 'Sistema', password_hash('password', PASSWORD_DEFAULT), 'admin'],
+            ['supervisor', 'Juan Carlos', 'Supervisor', password_hash('password', PASSWORD_DEFAULT), 'supervisor'],
+            ['empleado', 'María Elena', 'Empleada', password_hash('password', PASSWORD_DEFAULT), 'empleado']
+        ];
         
-        error_log("Tabla usuarios creada y usuario admin inicializado");
+        foreach ($usuarios_default as $user_data) {
+            $pdo->exec("
+                INSERT INTO usuarios (usuario, nombre, apellido, contraseña, rol) 
+                VALUES ('{$user_data[0]}', '{$user_data[1]}', '{$user_data[2]}', '{$user_data[3]}', '{$user_data[4]}')
+            ");
+        }
+        
+        error_log("Tabla usuarios creada con usuarios por defecto");
+    } else {
+        // Verificar si existen los usuarios por defecto, si no, crearlos
+        $stmt_check = $pdo->query("SELECT COUNT(*) FROM usuarios WHERE usuario IN ('admin', 'supervisor', 'empleado')");
+        $existing_users = $stmt_check->fetchColumn();
+        
+        if ($existing_users < 3) {
+            // Actualizar contraseñas existentes o crear usuarios faltantes
+            $usuarios_default = [
+                ['admin', 'Administrador', 'Sistema', 'admin'],
+                ['supervisor', 'Juan Carlos', 'Supervisor', 'supervisor'],
+                ['empleado', 'María Elena', 'Empleada', 'empleado']
+            ];
+            
+            foreach ($usuarios_default as $user_data) {
+                $password_hash = password_hash('password', PASSWORD_DEFAULT);
+                
+                // Intentar actualizar primero
+                $stmt_update = $pdo->prepare("UPDATE usuarios SET contraseña = ? WHERE usuario = ?");
+                $stmt_update->execute([$password_hash, $user_data[0]]);
+                
+                // Si no se actualizó ninguna fila, insertar
+                if ($stmt_update->rowCount() == 0) {
+                    try {
+                        $stmt_insert = $pdo->prepare("INSERT INTO usuarios (usuario, nombre, apellido, contraseña, rol) VALUES (?, ?, ?, ?, ?)");
+                        $stmt_insert->execute([$user_data[0], $user_data[1], $user_data[2], $password_hash, $user_data[3]]);
+                    } catch (Exception $e) {
+                        // Usuario ya existe, continuar
+                    }
+                }
+            }
+        }
     }
 } catch (Exception $e) {
     error_log("Error verificando/creando tabla usuarios: " . $e->getMessage());
@@ -75,16 +112,15 @@ try {
         $pdo->exec("
             CREATE TABLE familias (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                nombre_jefe VARCHAR(100) NOT NULL,
-                apellido_jefe VARCHAR(100) NOT NULL,
+                nombre_jefe VARCHAR(150) NOT NULL,
+                apellido_jefe VARCHAR(150) NOT NULL DEFAULT '',
                 dni_jefe VARCHAR(20) UNIQUE NOT NULL,
                 telefono VARCHAR(20) DEFAULT NULL,
                 direccion TEXT DEFAULT NULL,
                 barrio VARCHAR(100) DEFAULT NULL,
                 cantidad_integrantes INT DEFAULT 1,
                 estado ENUM('activa', 'inactiva') DEFAULT 'activa',
-                fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     }
@@ -95,7 +131,7 @@ try {
         $pdo->exec("
             CREATE TABLE ayudas (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                nombre_ayuda VARCHAR(200) NOT NULL,
+                nombre_ayuda VARCHAR(100) NOT NULL,
                 descripcion TEXT DEFAULT NULL,
                 activo TINYINT(1) DEFAULT 1,
                 fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -110,26 +146,68 @@ try {
             CREATE TABLE asignaciones (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 familia_id INT DEFAULT NULL,
-                tipo_ayuda_id INT DEFAULT NULL,
+                id_persona INT DEFAULT NULL,
                 id_ayuda INT DEFAULT NULL,
-                cantidad DECIMAL(10,2) DEFAULT 1.00,
-                motivo TEXT NOT NULL,
+                beneficiario_id INT DEFAULT NULL,
+                tipo_ayuda VARCHAR(255) DEFAULT NULL,
+                cantidad DECIMAL(10,2) NOT NULL DEFAULT 1.00,
+                motivo TEXT DEFAULT NULL,
                 observaciones TEXT DEFAULT NULL,
                 fecha_asignacion DATE NOT NULL,
-                prioridad ENUM('baja', 'media', 'alta', 'urgente') DEFAULT 'media',
-                numero_expediente VARCHAR(50) UNIQUE DEFAULT NULL,
-                usuario_asignador INT DEFAULT NULL,
+                estado ENUM('pendiente','autorizada','entregada','cancelada') DEFAULT 'pendiente',
+                prioridad ENUM('baja','media','alta','urgente') DEFAULT 'media',
+                numero_expediente VARCHAR(50) DEFAULT NULL,
+                usuario_asignador INT NOT NULL,
                 usuario_autorizador INT DEFAULT NULL,
                 usuario_entregador INT DEFAULT NULL,
-                fecha_autorizacion TIMESTAMP NULL,
-                fecha_entrega_real TIMESTAMP NULL,
-                estado ENUM('pendiente', 'autorizada', 'entregada', 'cancelada') DEFAULT 'pendiente',
-                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (familia_id) REFERENCES familias(id) ON DELETE SET NULL,
-                FOREIGN KEY (id_ayuda) REFERENCES ayudas(id) ON DELETE SET NULL,
-                FOREIGN KEY (usuario_asignador) REFERENCES usuarios(id) ON DELETE SET NULL,
-                FOREIGN KEY (usuario_autorizador) REFERENCES usuarios(id) ON DELETE SET NULL,
-                FOREIGN KEY (usuario_entregador) REFERENCES usuarios(id) ON DELETE SET NULL
+                fecha_autorizacion DATETIME DEFAULT NULL,
+                fecha_entrega_real DATETIME DEFAULT NULL,
+                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX(familia_id),
+                INDEX(id_ayuda),
+                INDEX(usuario_asignador)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+
+    // Tabla personas
+    $stmt = $pdo->query("SHOW TABLES LIKE 'personas'");
+    if ($stmt->rowCount() == 0) {
+        $pdo->exec("
+            CREATE TABLE personas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                apellido VARCHAR(100) DEFAULT '',
+                cedula VARCHAR(20) DEFAULT NULL,
+                direccion VARCHAR(255) DEFAULT NULL,
+                telefono VARCHAR(20) DEFAULT NULL,
+                id_familia INT DEFAULT NULL,
+                fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY cedula_unique (cedula),
+                INDEX(id_familia)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+
+    // Tabla beneficiarios
+    $stmt = $pdo->query("SHOW TABLES LIKE 'beneficiarios'");
+    if ($stmt->rowCount() == 0) {
+        $pdo->exec("
+            CREATE TABLE beneficiarios (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                apellido VARCHAR(100) DEFAULT '',
+                dni VARCHAR(20) NOT NULL,
+                fecha_nacimiento DATE DEFAULT NULL,
+                telefono VARCHAR(20) DEFAULT NULL,
+                direccion TEXT DEFAULT NULL,
+                email VARCHAR(100) DEFAULT NULL,
+                estado ENUM('activo','inactivo') DEFAULT 'activo',
+                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY dni_beneficiario_unique (dni)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     }
@@ -154,12 +232,13 @@ function registrarLog($pdo, $tabla, $registro_id, $accion, $descripcion, $usuari
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     tabla_afectada VARCHAR(50) NOT NULL,
                     registro_id INT NOT NULL,
-                    accion VARCHAR(50) NOT NULL,
-                    descripcion TEXT,
-                    usuario_id INT,
-                    ip_address VARCHAR(45),
-                    fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+                    accion ENUM('crear','actualizar','eliminar','autorizar','entregar','login') NOT NULL,
+                    descripcion TEXT DEFAULT NULL,
+                    usuario_id INT NOT NULL,
+                    ip_address VARCHAR(45) DEFAULT NULL,
+                    fecha_actividad DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX(usuario_id),
+                    INDEX(fecha_actividad)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
         }
@@ -180,6 +259,31 @@ function registrarLog($pdo, $tabla, $registro_id, $accion, $descripcion, $usuari
  */
 function obtenerConfiguracion($pdo, $clave, $default = null) {
     try {
+        // Verificar si existe la tabla de configuraciones
+        $stmt = $pdo->query("SHOW TABLES LIKE 'configuraciones'");
+        if ($stmt->rowCount() == 0) {
+            // Crear tabla de configuraciones
+            $pdo->exec("
+                CREATE TABLE configuraciones (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    clave VARCHAR(100) NOT NULL,
+                    valor TEXT DEFAULT NULL,
+                    descripcion TEXT DEFAULT NULL,
+                    tipo ENUM('texto','numero','booleano','json') DEFAULT 'texto',
+                    categoria VARCHAR(50) DEFAULT 'general',
+                    fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY clave_config_unique (clave)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            
+            // Insertar configuraciones por defecto
+            $pdo->exec("
+                INSERT INTO configuraciones (clave, valor, descripcion, categoria) VALUES
+                ('nombre_organizacion', 'Municipalidad de San Fernando', 'Nombre de la organización', 'general'),
+                ('version_sistema', '2.0', 'Versión del sistema', 'sistema')
+            ");
+        }
+        
         $stmt = $pdo->prepare("SELECT valor FROM configuraciones WHERE clave = ?");
         $stmt->execute([$clave]);
         $result = $stmt->fetchColumn();
